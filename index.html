@@ -3,8 +3,10 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <meta name="referrer" content="no-referrer" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: https:; connect-src 'self' https://api.github.com https://*.githubusercontent.com https:; object-src 'none'; base-uri 'self';" />
   <meta name="theme-color" content="#FAF9F6" />
-  <meta name="description" content="DepoKutusu: Kutucuklar içine notlar, linkler, paragraflar ve resimler koyabileceğiniz, çarpışmasız köşe panolu ve cihazlar arası senkronize kişisel depo uygulaması." />
+  <meta name="description" content="DepoKutusu: Kutucuklar içine notlar, linkler, paragraflar ve resimler koyabileceğiniz, AES-256-GCM uçtan uca şifrelemeli kişisel depo uygulaması." />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="default" />
   <meta name="apple-mobile-web-app-title" content="DepoKutusu" />
@@ -14,10 +16,36 @@
   <link rel="icon" type="image/svg+xml" href="./icon.svg" />
   <link rel="apple-touch-icon" href="./icon.svg" />
   <link rel="manifest" href="./manifest.json" />
-  <title>DepoKutusu — Mimari Köşe &amp; Depo Alanım</title>
+  <title>DepoKutusu — Mimari Köşe &amp; Şifreli Depo Alanım</title>
   <link rel="stylesheet" href="./styles.css" />
 </head>
 <body>
+  <!-- TAM EKRAN KASA KİLİT EKRANI (AES-256-GCM E2EE) -->
+  <div id="vaultLockOverlay" class="vault-lock-overlay" hidden>
+    <div class="vault-lock-card">
+      <div class="vault-lock-shield" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+      </div>
+      <span class="mono-label">ZERO-KNOWLEDGE // AES-256-GCM</span>
+      <h2>DepoKutusu Kilitli</h2>
+      <p>Tüm kutucuklarınız, notlarınız, resimleriniz ve senkronizasyon anahtarlarınız uçtan uca şifrelenmiştir.</p>
+
+      <form id="vaultUnlockForm" class="vault-unlock-form">
+        <input id="vaultUnlockPassInput" type="password" placeholder="Kasa şifrenizi girin..." autocomplete="current-password" required />
+        <p id="vaultUnlockError" class="vault-error-msg" hidden></p>
+        <button id="btnVaultUnlockSubmit" type="submit" class="btn btn-dark btn-lg" style="width: 100%;">
+          Kasayı Aç
+        </button>
+      </form>
+
+      <div class="vault-lock-footer">
+        <button id="btnVaultEmergencyReset" type="button" class="footer-link-btn danger-text">
+          Şifremi unuttum (Bu cihazdaki veriyi sıfırla)
+        </button>
+      </div>
+    </div>
+  </div>
+
   <!-- NAVBAR.GALLERY İLHAMLI YÜZEN MEGA MENÜ NAVİGASYON -->
   <header class="navbar-shell">
     <nav class="floating-navbar" aria-label="Ana Menü">
@@ -42,9 +70,7 @@
                     <span class="mono-label">HIZLI DEPO GEÇİŞİ</span>
                     <span id="megaMenuTotalCount" class="mono-pill">8 Depo</span>
                   </div>
-                  <div id="megaMenuBoxesList" class="mega-boxes-list">
-                    <!-- JS doldurur -->
-                  </div>
+                  <div id="megaMenuBoxesList" class="mega-boxes-list"></div>
                 </div>
 
                 <div class="mega-col-featured">
@@ -104,6 +130,16 @@
           <span id="syncStatusText">Yerel Kayıt</span>
         </div>
 
+        <button id="btnOpenSecurityModal" class="btn btn-ghost btn-icon-label security-shield-btn" type="button" title="Uçtan Uca Şifreleme &amp; Kasa Kilidi">
+          <svg class="svg-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/></svg>
+          <span id="securityNavLabel" class="btn-label">Güvenlik</span>
+        </button>
+
+        <button id="btnLockVaultNow" class="btn btn-ghost btn-icon-label" type="button" hidden title="Kasayı Anında Kilitle">
+          <svg class="svg-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+          <span class="btn-label">Kilitle</span>
+        </button>
+
         <button id="btnSyncNow" class="btn btn-ghost btn-icon-label" type="button" title="Bulut ile Şimdi Senkronize Et">
           <svg class="svg-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/><path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16"/><path d="M16 16h5v5"/></svg>
           <span class="btn-label">Senkronize</span>
@@ -111,12 +147,12 @@
 
         <button id="btnOpenSyncModal" class="btn btn-outline-accent btn-icon-label" type="button" title="Telefon Eşleştirme &amp; Bulut Ayarları">
           <svg class="svg-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9Z"/></svg>
-          <span class="btn-label">Cihaz Eşleştir</span>
+          <span class="btn-label">Eşleştir</span>
         </button>
 
         <button id="btnInstallPwa" class="btn btn-dark btn-icon-label" type="button" title="Telefona / Cihaza Uygulama Olarak Kur">
           <svg class="svg-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="14" height="20" x="5" y="2" rx="2" ry="2"/><path d="M12 18h.01"/></svg>
-          <span class="btn-label">Uygulamayı Kur</span>
+          <span class="btn-label">Kur</span>
         </button>
       </div>
     </nav>
@@ -129,16 +165,16 @@
       <div id="heroSection" class="supahero-block">
         <div class="supahero-eyebrow">
           <span class="live-ping"></span>
-          <span>4 KÖŞELİ ÇARPIŞMASIZ DEPO • GİTHUB &amp; MOBİL SENKRON</span>
+          <span>4 KÖŞELİ ÇARPIŞMASIZ DEPO • AES-256-GCM UÇTAN UCA ŞİFRELİ</span>
         </div>
 
         <h1 class="supahero-title">
           Her kutucuk ayrı bir depo,<br />
-          her köşesi <span class="serif-italic">çarpışmayan</span> özel bir alan.
+          her köşesi <span class="serif-italic">çarpışmayan</span> şifreli bir alan.
         </h1>
 
         <p class="supahero-subtitle">
-          Ana sayfadaki <strong>+</strong> kutucuklarına tıklayarak içine gir; notlarını, linklerini, paragraflarını ve resimlerini sayfanın dört ayrı köşesinde düzenle. Bilgisayar ve telefonun arasında otomatik senkronize kalsın.
+          Ana sayfadaki <strong>+</strong> kutucuklarına tıklayarak içine gir; notlarını, linklerini, paragraflarını ve resimlerini sayfanın dört ayrı köşesinde düzenle. Tüm verilerin kasa şifrenle cihazında şifrelenip telefonunla eşitlensin.
         </p>
 
         <div class="supahero-actions-row">
@@ -152,7 +188,7 @@
           </button>
 
           <button id="btnHeroSync" class="btn btn-ghost btn-lg" type="button">
-            Telefonla Senkronize Et →
+            Şifreleme &amp; Senkron →
           </button>
         </div>
 
@@ -186,26 +222,24 @@
         <span class="grid-hint">Açmak için bir kutucuğa tıkla, yeniden adlandırmak için kalem simgesini kullan.</span>
       </div>
 
-      <div id="boxesGrid" class="boxes-grid" aria-live="polite">
-        <!-- Kutucuklar JS ile oluşturulur -->
-      </div>
+      <div id="boxesGrid" class="boxes-grid" aria-live="polite"></div>
 
       <!-- CTA.GALLERY İLHAMLI YÜKSEK KONTRASTLI CALL-TO-ACTION BÖLÜMÜ -->
-      <section id="ctaSection" class="cta-gallery-card" aria-label="Cihaz Senkronizasyonu ve Mobil Kurulum">
+      <section id="ctaSection" class="cta-gallery-card" aria-label="Cihaz Senkronizasyonu ve Güvenlik">
         <div class="cta-glow-orb orb-1" aria-hidden="true"></div>
         <div class="cta-glow-orb orb-2" aria-hidden="true"></div>
         <div class="cta-grid-overlay" aria-hidden="true"></div>
 
         <div class="cta-inner">
           <div class="cta-copy">
-            <span class="cta-eyebrow">GITHUB PAGES + MOBİL PWA</span>
-            <h2>Bilgisayarında depola, <span class="serif-italic">telefonunda</span> anında aç.</h2>
-            <p>Ek bir sunucu veya üyelik ücreti olmadan kendi GitHub Gist alanına bağlan; QR kodunu telefonuna okutarak tüm notlarına ve resimlerine cepten ulaş.</p>
+            <span class="cta-eyebrow">ZERO-KNOWLEDGE AES-256-GCM + MOBİL PWA</span>
+            <h2>Bilgisayarında şifrele, <span class="serif-italic">telefonunda</span> güvenle aç.</h2>
+            <p>Kasa şifresi belirlediğinde tüm notların, resimlerin ve linklerin cihazından çıkmadan AES-256-GCM ile şifrelenir; GitHub dahil hiç kimse içeriğini göremez.</p>
           </div>
 
           <div class="cta-buttons">
             <button id="btnCtaPair" class="btn btn-white btn-lg" type="button">
-              QR ile Telefonu Bağla →
+              Telefonu Güvenle Bağla →
             </button>
             <button id="btnCtaInstall" class="btn btn-dark-outline btn-lg" type="button">
               Telefona Uygulama Kur
@@ -414,13 +448,13 @@
           <img src="./icon.svg" alt="DepoKutusu" class="brand-logo" />
           <div>
             <strong>DepoKutusu</strong>
-            <p>Kişisel 4 Köşeli Çarpışmasız Depo &amp; Senkronizasyon Platformu</p>
+            <p>Uçtan Uca Şifreli (AES-256-GCM) 4 Köşeli Depo &amp; Senkronizasyon Platformu</p>
           </div>
         </div>
         <div class="footer-top-right">
           <span class="system-status-pill">
             <span class="status-green-dot"></span>
-            Çevrimdışı &amp; Bulut Senkron Hazır
+            Web Crypto API &amp; Çevrimdışı Hazır
           </span>
           <button id="btnScrollTop" type="button" class="btn btn-ghost btn-sm">↑ Yukarı Dön</button>
         </div>
@@ -429,9 +463,7 @@
       <div class="footer-columns">
         <div class="footer-col">
           <span class="mono-label">HIZLI DEPO ERİŞİMİ</span>
-          <ul id="footerBoxesLinks" class="footer-link-list">
-            <!-- JS doldurur -->
-          </ul>
+          <ul id="footerBoxesLinks" class="footer-link-list"></ul>
           <button id="footerNewBoxBtn" type="button" class="footer-action-link">+ Yeni Kutucuk Ekle</button>
         </div>
 
@@ -446,11 +478,11 @@
         </div>
 
         <div class="footer-col">
-          <span class="mono-label">SENKRONİZASYON &amp; VERİ</span>
+          <span class="mono-label">SENKRONİZASYON &amp; GÜVENLİK</span>
           <ul class="footer-link-list">
+            <li><button type="button" class="footer-link-btn" id="footerSecurityBtn">Kasa Şifresi &amp; AES-256</button></li>
             <li><button type="button" class="footer-link-btn" data-footer-sync="github">GitHub Gist Bağlantısı</button></li>
-            <li><button type="button" class="footer-link-btn" data-footer-sync="pair">QR ile Telefon Eşleştir</button></li>
-            <li><button type="button" class="footer-link-btn" data-footer-sync="custom">Özel Bulut / Firebase</button></li>
+            <li><button type="button" class="footer-link-btn" data-footer-sync="pair">Şifreli Telefon Eşleştirme</button></li>
             <li><button type="button" class="footer-link-btn" data-footer-sync="backup">JSON Yedek Al / Yükle</button></li>
           </ul>
         </div>
@@ -466,8 +498,8 @@
       </div>
 
       <div class="footer-bottom-meta">
-        <span>GitHub Pages ile sıfır sunucu kurulumunda çalışır.</span>
-        <span class="mono-label">VER 3.0 // AÇIK MİMARİ TEMA</span>
+        <span>Kişisel verileriniz yalnızca tarayıcınızda şifrelenir ve asla üçüncü taraf sunuculara sızdırılmaz.</span>
+        <span class="mono-label">VER 4.0 // E2EE SECURE</span>
       </div>
 
       <div class="footer-giant-wordmark" aria-hidden="true">DEPOKUTUSU</div>
@@ -537,14 +569,14 @@
       <div class="modal-body">
         <div class="sync-tabs">
           <button type="button" class="sync-tab active" data-sync-tab="github">GitHub Gist (Önerilen)</button>
-          <button type="button" class="sync-tab" data-sync-tab="pair">Telefona Bağla (QR / Kod)</button>
+          <button type="button" class="sync-tab" data-sync-tab="pair">Telefona Bağla (Şifreli)</button>
           <button type="button" class="sync-tab" data-sync-tab="custom">Özel Bulut / Firebase</button>
           <button type="button" class="sync-tab" data-sync-tab="backup">JSON Yedek</button>
         </div>
 
         <div id="syncTabGithub" class="sync-tab-panel active">
           <div class="info-banner">
-            <strong>Nasıl Çalışır?</strong> GitHub hesabınızda sadece sizin erişebildiğiniz gizli bir <code>Gist</code> dosyası oluşturur. Bilgisayardan veya telefondan eklediğiniz tüm notlar, linkler, paragraflar ve resimler otomatik eşitlenir.
+            <strong>Güvenli Bulut:</strong> Kasa şifresi belirlediğinizde GitHub Gist üzerine giden veriler <code>AES-256-GCM</code> ile şifrelenir; GitHub veya başka hiç kimse içeriğinizi okuyamaz.
           </div>
 
           <label class="field-label" for="ghTokenInput">GitHub Personal Access Token (<code>gist</code> yetkili)</label>
@@ -564,39 +596,40 @@
 
         <div id="syncTabPair" class="sync-tab-panel" hidden>
           <div id="pairNotConfiguredMsg" class="info-banner warn" hidden>
-            Önce <strong>GitHub Gist</strong> veya <strong>Özel Bulut</strong> sekmesinden senkronizasyonu aktif edin; ardından telefonunuzu tek tıkla eşleştirecek QR Kod ve Link burada oluşacaktır.
+            Önce <strong>GitHub Gist</strong> veya <strong>Özel Bulut</strong> sekmesinden senkronizasyonu aktif edin; ardından telefonunuzu bağlayacak güvenli eşleştirme kodu burada oluşacaktır.
           </div>
 
           <div id="pairReadyArea">
-            <p class="field-hint" style="margin-bottom: 12px;">
-              Aşağıdaki QR kodu telefon kameranızla okutun veya eşleştirme linkini telefonunuza gönderip açın. Telefonunuzdaki uygulama anında senkronize olur!
-            </p>
-            <div class="pair-grid">
-              <div class="qr-box">
-                <img id="pairingQrImg" alt="Telefon Eşleştirme QR Kodu" />
-                <span>Telefonla Okut</span>
-              </div>
-              <div class="pair-codes">
-                <label class="field-label">Tek Tıkla Eşleştirme Linki</label>
-                <div class="copy-row">
-                  <input id="pairingLinkOutput" type="text" readonly />
-                  <button id="btnCopyPairingLink" type="button" class="btn btn-sm btn-dark">Kopyala</button>
-                </div>
+            <div id="pairingSecurityNotice" class="pairing-secure-card">
+              <strong>Sıfır Üçüncü Taraf Sızıntısı</strong>
+              <p>Eşleştirme kodunuz hiçbir harici QR sunucusuna gönderilmez. Kasa şifresi aktifken aşağıdaki eşleştirme linki ve kodu <code>AES-256-GCM</code> ile şifrelenir; şifrenizi bilmeyen biri linki ele geçirse bile tokenınıza erişemez.</p>
+            </div>
 
-                <label class="field-label" style="margin-top: 12px;">Eşleştirme Kodu</label>
-                <div class="copy-row">
-                  <input id="pairingCodeOutput" type="text" readonly />
-                  <button id="btnCopyPairingCode" type="button" class="btn btn-sm btn-ghost">Kopyala</button>
-                </div>
+            <div class="pair-codes">
+              <label class="field-label">Güvenli Eşleştirme Linki (Telefonda Aç)</label>
+              <div class="copy-row">
+                <input id="pairingLinkOutput" type="text" readonly />
+                <button id="btnCopyPairingLink" type="button" class="btn btn-sm btn-dark">Kopyala</button>
+              </div>
+
+              <label class="field-label" style="margin-top: 12px;">Güvenli Eşleştirme Kodu</label>
+              <div class="copy-row">
+                <input id="pairingCodeOutput" type="text" readonly />
+                <button id="btnCopyPairingCode" type="button" class="btn btn-sm btn-ghost">Kopyala</button>
               </div>
             </div>
           </div>
 
           <hr class="divider" />
           <label class="field-label" for="pastePairingCodeInput">Bu cihaza başka bir cihazdan aldığın Eşleştirme Kodunu gir:</label>
-          <div class="copy-row">
-            <input id="pastePairingCodeInput" type="text" placeholder="Eşleştirme kodunu buraya yapıştır..." />
-            <button id="btnApplyPairingCode" type="button" class="btn btn-sm btn-dark">Cihazı Bağla</button>
+          <div class="stack-form">
+            <input id="pastePairingCodeInput" type="text" placeholder="Eşleştirme kodunu (ENC1:... veya kod) buraya yapıştır..." />
+            <div id="pairingDecryptWrap" hidden>
+              <input id="pairingDecryptPassInput" type="password" placeholder="Bu kodu çözmek için Kasa Şifrenizi girin..." autocomplete="current-password" />
+            </div>
+            <div class="form-actions-end">
+              <button id="btnApplyPairingCode" type="button" class="btn btn-sm btn-dark">Cihazı Bağla</button>
+            </div>
           </div>
         </div>
 
@@ -646,6 +679,61 @@
         <div class="modal-footer">
           <button id="btnOkIosModal" type="button" class="btn btn-dark">Anladım</button>
         </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL 6: ÜST DÜZEY GÜVENLİK & UÇTAN UCA ŞİFRELEME (E2EE) -->
+  <div id="securityModal" class="modal-backdrop" hidden>
+    <div class="modal-card modal-md">
+      <div class="modal-header">
+        <h3>Üst Düzey Güvenlik &amp; Şifreleme</h3>
+        <button id="btnCloseSecurityModal" class="btn-mini-icon" type="button">✕</button>
+      </div>
+
+      <div class="modal-body">
+        <div id="securityStatusBanner" class="info-banner">
+          <!-- JS durum rozetini yazar -->
+        </div>
+
+        <form id="securitySetupForm" class="stack-form">
+          <div id="vaultCurrentPassGroup" hidden>
+            <label class="field-label" for="vaultCurrentPassInput">Mevcut Kasa Şifresi</label>
+            <input id="vaultCurrentPassInput" type="password" placeholder="Mevcut şifrenizi doğrulayın..." autocomplete="current-password" />
+          </div>
+
+          <div class="form-row-2">
+            <div>
+              <label class="field-label" for="vaultNewPassInput">Yeni Kasa Şifresi (En az 6 karakter)</label>
+              <input id="vaultNewPassInput" type="password" minlength="6" placeholder="Güçlü bir şifre girin..." autocomplete="new-password" required />
+            </div>
+            <div>
+              <label class="field-label" for="vaultConfirmPassInput">Yeni Şifre (Tekrar)</label>
+              <input id="vaultConfirmPassInput" type="password" minlength="6" placeholder="Şifreyi tekrar girin..." autocomplete="new-password" required />
+            </div>
+          </div>
+
+          <div style="margin-top: 6px;">
+            <label class="field-label" for="autoLockMinutesSelect">Otomatik Kilitleme Süresi</label>
+            <select id="autoLockMinutesSelect" class="select-input">
+              <option value="5">5 dakika işlem yapılmazsa kilitle (Önerilen)</option>
+              <option value="1">1 dakika işlem yapılmazsa kilitle</option>
+              <option value="15">15 dakika işlem yapılmazsa kilitle</option>
+              <option value="30">30 dakika işlem yapılmazsa kilitle</option>
+              <option value="-1">Sekme gizlendiğinde / pencere değişince hemen kilitle</option>
+              <option value="0">Yalnızca sayfa yenilenince veya manuel kilitle</option>
+            </select>
+          </div>
+
+          <p class="field-hint">
+            Şifreniz hiçbir diske veya buluta kaydedilmez. Verileriniz <code>PBKDF2-SHA256</code> (250.000 tur) ve <code>AES-256-GCM</code> ile şifrelenir. Şifreyi unutursanız kimse verilerinizi kurtaramaz.
+          </p>
+
+          <div class="modal-footer-split">
+            <button id="btnDisableVaultLock" type="button" class="btn btn-danger-soft" hidden>Kasa Şifresini Kaldır</button>
+            <button id="btnSaveSecurity" type="submit" class="btn btn-dark">Şifrelemeyi Etkinleştir / Güncelle</button>
+          </div>
+        </form>
       </div>
     </div>
   </div>

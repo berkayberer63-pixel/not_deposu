@@ -10,6 +10,8 @@
   const STATE_KEY = 'mainState';
   const LS_BACKUP_KEY = 'depokutusu_state_v1';
   const LS_SYNC_CONFIG_KEY = 'depokutusu_sync_config_v1';
+  const LS_SECURITY_META_KEY = 'depokutusu_security_meta_v1';
+  const PBKDF2_ITERATIONS = 250000;
   const SAFE_MARGIN = 22;
   const DEFAULT_BOX_COUNT = 8;
 
@@ -30,10 +32,19 @@
   const SVG_OPEN = '<svg class="svg-icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg>';
 
   // ============================================================================
-  // UYGULAMA DURUMU (STATE)
+  // UYGULAMA DURUMU (STATE) & GÜVENLİK OTURUMU
   // ============================================================================
   let appState = null;
-  let syncConfig = loadSyncConfig();
+  let securityMeta = loadSecurityMeta();
+  let sessionMasterPassword = null; // Asla diske yazılmaz, sadece RAM'de tutulur
+  let isVaultLocked = false;
+  let lockedLocalEnvelope = null;
+  let lockedSyncEnvelope = null;
+  let pendingRemoteEnvelope = null;
+  let autoLockTimer = null;
+  let failedUnlockAttempts = 0;
+  let lockoutUntil = 0;
+  let syncConfig = loadSyncConfigRaw();
   let activeBoxId = null;
   let editingBoxId = null; // null => yeni kutu oluşturma, string => düzenleme
   let editingParaContext = null; // { boxId, paraId }
@@ -42,6 +53,120 @@
   let cloudPullInterval = null;
   let isSyncing = false;
   let activeMobileCorner = 'all';
+
+  // ============================================================================
+  // WEB CRYPTO API (AES-256-GCM + PBKDF2-SHA256 E2EE)
+  // ============================================================================
+  const VaultCrypto = {
+    bufToBase64(buf) {
+      const bytes = buf instanceof Uint8Array ? buf : new Uint8Array(buf);
+      let bin = '';
+      const chunk = 0x8000;
+      for (let i = 0; i < bytes.length; i += chunk) {
+        bin += String.fromCharCode(...bytes.subarray(i, i + chunk));
+      }
+      return btoa(bin);
+    },
+    base64ToBuf(b64) {
+      const bin = atob(b64);
+      const bytes = new Uint8Array(bin.length);
+      for (let i = 0; i < bin.length; i += 1) {
+        bytes[i] = bin.charCodeAt(i);
+      }
+      return bytes;
+    },
+    isEncryptedEnvelope(obj) {
+      return Boolean(
+        obj &&
+        typeof obj === 'object' &&
+        obj.e2ee === true &&
+        obj.alg === 'AES-256-GCM' &&
+        typeof obj.salt === 'string' &&
+        typeof obj.iv === 'string' &&
+        typeof obj.cipher === 'string'
+      );
+    },
+    async deriveAesKey(password, saltBytes, iterations = PBKDF2_ITERATIONS) {
+      if (!window.crypto || !window.crypto.subtle) {
+        throw new Error('Bu tarayıcı ortamında Web Crypto API (HTTPS/Güvenli Bağlam) desteklenmiyor.');
+      }
+      const keyMaterial = await window.crypto.subtle.importKey(
+        'raw',
+        new TextEncoder().encode(password),
+        'PBKDF2',
+        false,
+        ['deriveKey']
+      );
+      return window.crypto.subtle.deriveKey(
+        {
+          name: 'PBKDF2',
+          salt: saltBytes,
+          iterations,
+          hash: 'SHA-256'
+        },
+        keyMaterial,
+        { name: 'AES-GCM', length: 256 },
+        false,
+        ['encrypt', 'decrypt']
+      );
+    },
+    async encryptPayload(plainObj, password) {
+      const salt = window.crypto.getRandomValues(new Uint8Array(16));
+      const iv = window.crypto.getRandomValues(new Uint8Array(12));
+      const key = await this.deriveAesKey(password, salt, PBKDF2_ITERATIONS);
+      const encoded = new TextEncoder().encode(JSON.stringify(plainObj));
+      const encrypted = await window.crypto.subtle.encrypt(
+        { name: 'AES-GCM', iv },
+        key,
+        encoded
+      );
+      return {
+        e2ee: true,
+        v: 1,
+        alg: 'AES-256-GCM',
+        kdf: 'PBKDF2-SHA256',
+        iter: PBKDF2_ITERATIONS,
+        salt: this.bufToBase64(salt),
+        iv: this.bufToBase64(iv),
+        cipher: this.bufToBase64(encrypted)
+      };
+    },
+    async decryptPayload(envelope, password) {
+      const salt = this.base64ToBuf(envelope.salt);
+      const iv = this.base64ToBuf(envelope.iv);
+      const cipher = this.base64ToBuf(envelope.cipher);
+      const key = await this.deriveAesKey(password, salt, Number(envelope.iter) || PBKDF2_ITERATIONS);
+      const decrypted = await window.crypto.subtle.decrypt(
+        { name: 'AES-GCM', iv },
+        key,
+        cipher
+      );
+      return JSON.parse(new TextDecoder().decode(decrypted));
+    }
+  };
+
+  function loadSecurityMeta() {
+    try {
+      const raw = localStorage.getItem(LS_SECURITY_META_KEY);
+      if (!raw) return { enabled: false, autoLockMinutes: 5 };
+      const parsed = JSON.parse(raw);
+      return {
+        enabled: Boolean(parsed.enabled),
+        autoLockMinutes: Number.isFinite(Number(parsed.autoLockMinutes)) ? Number(parsed.autoLockMinutes) : 5
+      };
+    } catch {
+      return { enabled: false, autoLockMinutes: 5 };
+    }
+  }
+
+  function saveSecurityMeta(meta) {
+    securityMeta = {
+      enabled: Boolean(meta.enabled),
+      autoLockMinutes: Number.isFinite(Number(meta.autoLockMinutes)) ? Number(meta.autoLockMinutes) : 5
+    };
+    localStorage.setItem(LS_SECURITY_META_KEY, JSON.stringify(securityMeta));
+    updateSecurityUI();
+  }
 
   // ============================================================================
   // YARDIMCI FONKSİYONLAR
@@ -242,41 +367,52 @@
     });
   }
 
-  async function loadLocalState() {
+  async function loadLocalStateRaw() {
     try {
       const fromIdb = await idbGet(STATE_KEY);
-      if (fromIdb) return sanitizeState(fromIdb);
+      if (fromIdb) return fromIdb;
     } catch (err) {
       console.warn('IndexedDB okuma hatası, localStorage deneniyor:', err);
     }
     try {
       const raw = localStorage.getItem(LS_BACKUP_KEY);
-      if (raw) return sanitizeState(JSON.parse(raw));
+      if (raw) return JSON.parse(raw);
     } catch (err) {
       console.warn('localStorage okuma hatası:', err);
     }
-    return createInitialState();
+    return null;
   }
 
   async function persistLocalState(markModified = true) {
+    if (isVaultLocked) return;
     if (markModified) {
       appState.isPristineDefault = false;
       appState.updatedAt = Date.now();
     }
+    let payloadToStore = appState;
+    if (sessionMasterPassword) {
+      try {
+        payloadToStore = await VaultCrypto.encryptPayload(appState, sessionMasterPassword);
+      } catch (err) {
+        console.error('Yerel şifreleme hatası:', err);
+        showToast(`Şifreleme hatası: ${err.message}`, 'error');
+        return;
+      }
+    }
     try {
-      await idbSet(STATE_KEY, appState);
+      await idbSet(STATE_KEY, payloadToStore);
     } catch (err) {
       console.warn('IndexedDB yazma hatası:', err);
     }
     try {
-      localStorage.setItem(LS_BACKUP_KEY, JSON.stringify(appState));
+      localStorage.setItem(LS_BACKUP_KEY, JSON.stringify(payloadToStore));
     } catch (err) {
-      // Büyük resimlerde localStorage kotası dolabilir, IndexedDB birincil depodur
       console.warn('localStorage yedek sınırı:', err);
     }
   }
 
   function saveStateAndSync() {
+    if (isVaultLocked) return;
     updateGlobalStatsAndNav();
     persistLocalState(true).then(() => {
       scheduleCloudPush();
@@ -284,20 +420,35 @@
   }
 
   // ============================================================================
-  // BULUT & GİTHUB SENKRONİZASYON MOTORU
+  // BULUT & GİTHUB SENKRONİZASYON MOTORU (E2EE DESTEKLİ)
   // ============================================================================
-  function loadSyncConfig() {
+  function loadSyncConfigRaw() {
     try {
       const raw = localStorage.getItem(LS_SYNC_CONFIG_KEY);
-      return raw ? JSON.parse(raw) : { mode: 'none' };
+      if (!raw) return { mode: 'none' };
+      const parsed = JSON.parse(raw);
+      if (VaultCrypto.isEncryptedEnvelope(parsed)) {
+        lockedSyncEnvelope = parsed;
+        return { mode: 'none' };
+      }
+      return parsed;
     } catch {
       return { mode: 'none' };
     }
   }
 
-  function saveSyncConfig(cfg) {
+  async function saveSyncConfig(cfg) {
     syncConfig = cfg || { mode: 'none' };
-    localStorage.setItem(LS_SYNC_CONFIG_KEY, JSON.stringify(syncConfig));
+    try {
+      if (sessionMasterPassword) {
+        const encryptedCfg = await VaultCrypto.encryptPayload(syncConfig, sessionMasterPassword);
+        localStorage.setItem(LS_SYNC_CONFIG_KEY, JSON.stringify(encryptedCfg));
+      } else {
+        localStorage.setItem(LS_SYNC_CONFIG_KEY, JSON.stringify(syncConfig));
+      }
+    } catch (err) {
+      console.error('Sync ayarları şifrelenemedi:', err);
+    }
     updateSyncStatusUI();
     refreshPairingOutputs();
   }
@@ -312,11 +463,11 @@
 
   function updateSyncStatusUI() {
     if (syncConfig.mode === 'github' && syncConfig.token && syncConfig.gistId) {
-      setSyncBadge('synced', 'GitHub Senkron');
+      setSyncBadge('synced', sessionMasterPassword ? 'GitHub Şifreli ✓' : 'GitHub Senkron');
     } else if (syncConfig.mode === 'custom' && syncConfig.url) {
-      setSyncBadge('synced', 'Bulut Senkron');
+      setSyncBadge('synced', sessionMasterPassword ? 'Bulut Şifreli ✓' : 'Bulut Senkron');
     } else {
-      setSyncBadge('local', 'Yerel Kayıt');
+      setSyncBadge('local', sessionMasterPassword ? 'Şifreli Yerel' : 'Yerel Kayıt');
     }
   }
 
@@ -328,7 +479,7 @@
   }
 
   function scheduleCloudPush() {
-    if (!isCloudConfigured()) return;
+    if (!isCloudConfigured() || isVaultLocked) return;
     clearTimeout(cloudPushTimer);
     setSyncBadge('syncing', 'Kaydediliyor...');
     cloudPushTimer = setTimeout(() => {
@@ -356,13 +507,21 @@
     return res.json();
   }
 
+  async function serializeForCloud() {
+    if (sessionMasterPassword) {
+      const envelope = await VaultCrypto.encryptPayload(appState, sessionMasterPassword);
+      return JSON.stringify(envelope);
+    }
+    return JSON.stringify(appState);
+  }
+
   async function pushToCloud(showSuccessToast = false) {
-    if (!isCloudConfigured()) return;
+    if (!isCloudConfigured() || isVaultLocked) return;
     if (isSyncing) return;
     isSyncing = true;
-    setSyncBadge('syncing', 'Buluta Gönderiliyor...');
+    setSyncBadge('syncing', sessionMasterPassword ? 'Şifreli Gönderiliyor...' : 'Buluta Gönderiliyor...');
     try {
-      const payloadStr = JSON.stringify(appState);
+      const payloadStr = await serializeForCloud();
       if (syncConfig.mode === 'github') {
         await githubApi(`/gists/${syncConfig.gistId}`, 'PATCH', {
           description: 'DepoKutusu Senkronizasyon Verisi',
@@ -384,7 +543,10 @@
         });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
       }
-      setSyncBadge('synced', syncConfig.mode === 'github' ? 'GitHub Senkron ✓' : 'Bulut Senkron ✓');
+      setSyncBadge(
+        'synced',
+        sessionMasterPassword ? 'E2EE Bulut ✓' : (syncConfig.mode === 'github' ? 'GitHub Senkron ✓' : 'Bulut Senkron ✓')
+      );
       if (showSuccessToast) showToast('Veriler buluta kaydedildi.', 'success');
     } catch (err) {
       console.error('Buluta gönderme hatası:', err);
@@ -396,6 +558,7 @@
   }
 
   async function pullFromCloud(forceApply = false, showAlerts = false) {
+    if (isVaultLocked) return false;
     if (!isCloudConfigured()) {
       if (showAlerts) showToast('Henüz bulut senkronizasyonu bağlı değil.', 'warn');
       return false;
@@ -426,6 +589,23 @@
         remoteRaw = await res.json();
       }
 
+      if (remoteRaw && VaultCrypto.isEncryptedEnvelope(remoteRaw)) {
+        if (!sessionMasterPassword) {
+          pendingRemoteEnvelope = remoteRaw;
+          isSyncing = false;
+          showVaultLockOverlay('Buluttaki veriler AES-256-GCM ile şifreli. Açmak için kasa şifrenizi girin:');
+          return false;
+        }
+        try {
+          remoteRaw = await VaultCrypto.decryptPayload(remoteRaw, sessionMasterPassword);
+        } catch {
+          pendingRemoteEnvelope = remoteRaw;
+          isSyncing = false;
+          showVaultLockOverlay('Buluttaki veriler farklı bir Kasa Şifresi ile şifrelenmiş. Çözmek için o şifreyi girin:');
+          return false;
+        }
+      }
+
       if (remoteRaw && Array.isArray(remoteRaw.boxes)) {
         const remoteState = sanitizeState(remoteRaw);
         const shouldTakeRemote =
@@ -447,14 +627,13 @@
           if (showAlerts) showToast('Tüm veriler zaten güncel.', 'success');
         }
       } else {
-        // Bulut boşsa yerel veriyi gönder
         isSyncing = false;
         await pushToCloud(false);
         if (showAlerts) showToast('Veriler buluta ilk kez yüklendi.', 'success');
         return true;
       }
 
-      setSyncBadge('synced', syncConfig.mode === 'github' ? 'GitHub Senkron ✓' : 'Bulut Senkron ✓');
+      updateSyncStatusUI();
       return true;
     } catch (err) {
       console.error('Buluttan çekme hatası:', err);
@@ -477,22 +656,22 @@
     setSyncBadge('syncing', 'GitHub Bağlanıyor...');
     try {
       if (!gistId) {
-        // Yeni gizli Gist oluştur
+        const contentStr = await serializeForCloud();
         const created = await githubApi('/gists', 'POST', {
           description: 'DepoKutusu Kişisel Senkronizasyon Verisi',
           public: false,
           files: {
             'depokutusu_data.json': {
-              content: JSON.stringify(appState)
+              content: contentStr
             }
           }
         }, token);
         gistId = created.id;
         $('ghGistIdInput').value = gistId;
-        saveSyncConfig({ mode: 'github', token, gistId });
+        await saveSyncConfig({ mode: 'github', token, gistId });
         showToast('Yeni gizli GitHub bulut deposu oluşturuldu ve bağlandı!', 'success');
       } else {
-        saveSyncConfig({ mode: 'github', token, gistId });
+        await saveSyncConfig({ mode: 'github', token, gistId });
         await pullFromCloud(false, true);
       }
       switchSyncTab('pair');
@@ -509,13 +688,13 @@
       showToast('Lütfen geçerli bir Bulut JSON URL adresi girin.', 'warn');
       return;
     }
-    saveSyncConfig({ mode: 'custom', url, authHeader });
+    await saveSyncConfig({ mode: 'custom', url, authHeader });
     await pullFromCloud(false, true);
     switchSyncTab('pair');
   }
 
-  function disconnectSync() {
-    saveSyncConfig({ mode: 'none' });
+  async function disconnectSync() {
+    await saveSyncConfig({ mode: 'none' });
     $('ghTokenInput').value = '';
     $('ghGistIdInput').value = '';
     $('customUrlInput').value = '';
@@ -523,12 +702,16 @@
     showToast('Bulut bağlantısı kesildi. Veriler yerel cihazda saklanmaya devam ediyor.', 'info');
   }
 
-  function generatePairingCode() {
+  async function generatePairingCode() {
     if (!isCloudConfigured()) return '';
+    if (sessionMasterPassword) {
+      const enc = await VaultCrypto.encryptPayload(syncConfig, sessionMasterPassword);
+      return `ENC1:${toBase64Utf8(JSON.stringify(enc))}`;
+    }
     return toBase64Utf8(JSON.stringify(syncConfig));
   }
 
-  function refreshPairingOutputs() {
+  async function refreshPairingOutputs() {
     const notCfg = $('pairNotConfiguredMsg');
     const readyArea = $('pairReadyArea');
     if (!notCfg || !readyArea) return;
@@ -541,24 +724,52 @@
     notCfg.hidden = true;
     readyArea.hidden = false;
 
-    const code = generatePairingCode();
+    const code = await generatePairingCode();
     const baseUrl = `${window.location.origin}${window.location.pathname}`;
     const pairLink = `${baseUrl}?sync=${encodeURIComponent(code)}`;
 
     $('pairingCodeOutput').value = code;
     $('pairingLinkOutput').value = pairLink;
-    $('pairingQrImg').src = `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(pairLink)}`;
   }
 
   async function applyPairingCode(rawCode) {
     try {
       const cleaned = rawCode.trim();
       if (!cleaned) return false;
-      const decoded = JSON.parse(fromBase64Utf8(cleaned));
+      let decoded = null;
+
+      if (cleaned.startsWith('ENC1:')) {
+        const envelope = JSON.parse(fromBase64Utf8(cleaned.slice(5)));
+        const pass = ($('pairingDecryptPassInput').value || '').trim() || sessionMasterPassword;
+        if (!pass) {
+          $('pastePairingCodeInput').value = cleaned;
+          $('pairingDecryptWrap').hidden = false;
+          openSyncModal('pair');
+          setTimeout(() => $('pairingDecryptPassInput').focus(), 40);
+          showToast('Bu eşleştirme kodu şifrelidir. Lütfen Kasa Şifrenizi girin.', 'warn', 4500);
+          return false;
+        }
+        try {
+          decoded = await VaultCrypto.decryptPayload(envelope, pass);
+        } catch {
+          $('pairingDecryptWrap').hidden = false;
+          $('pairingDecryptPassInput').focus();
+          showToast('Kasa şifresi hatalı, eşleştirme kodu çözülemedi!', 'error');
+          return false;
+        }
+        sessionMasterPassword = pass;
+        saveSecurityMeta({ enabled: true, autoLockMinutes: securityMeta.autoLockMinutes });
+        await persistLocalState(false);
+        $('pairingDecryptPassInput').value = '';
+        $('pairingDecryptWrap').hidden = true;
+      } else {
+        decoded = JSON.parse(fromBase64Utf8(cleaned));
+      }
+
       if (!decoded || (decoded.mode !== 'github' && decoded.mode !== 'custom')) {
         throw new Error('Geçersiz eşleştirme kodu');
       }
-      saveSyncConfig(decoded);
+      await saveSyncConfig(decoded);
       if (decoded.mode === 'github') {
         $('ghTokenInput').value = decoded.token || '';
         $('ghGistIdInput').value = decoded.gistId || '';
@@ -579,10 +790,115 @@
     const params = new URLSearchParams(window.location.search);
     const code = params.get('sync');
     if (!code) return;
-    // Güvenlik için URL'den token bilgisini hemen temizle
     const cleanUrl = `${window.location.origin}${window.location.pathname}${window.location.hash}`;
     window.history.replaceState({}, document.title, cleanUrl);
     await applyPairingCode(code);
+  }
+
+  // ============================================================================
+  // KASA KİLİDİ, GÜVENLİK YÖNETİMİ VE OTOMATİK KİLİT
+  // ============================================================================
+  function updateSecurityUI() {
+    const btn = $('btnOpenSecurityModal');
+    const navLabel = $('securityNavLabel');
+    const lockBtn = $('btnLockVaultNow');
+    const banner = $('securityStatusBanner');
+    const curGroup = $('vaultCurrentPassGroup');
+    const disableBtn = $('btnDisableVaultLock');
+    const isEncrypted = Boolean(securityMeta.enabled || sessionMasterPassword);
+
+    if (btn) btn.classList.toggle('encrypted', isEncrypted);
+    if (navLabel) navLabel.textContent = isEncrypted ? 'AES-256 ✓' : 'Güvenlik';
+    if (lockBtn) lockBtn.hidden = !sessionMasterPassword;
+    if (curGroup) curGroup.hidden = !isEncrypted;
+    if (disableBtn) disableBtn.hidden = !isEncrypted;
+
+    if (banner) {
+      if (isEncrypted) {
+        banner.className = 'info-banner secure';
+        banner.innerHTML = '<strong>AES-256-GCM Uçtan Uca Şifreleme Aktif:</strong> Verileriniz bu cihazda ve bulutta şifreli olarak korunuyor. Şifreniz hiçbir yere kaydedilmez.';
+      } else {
+        banner.className = 'info-banner warn';
+        banner.innerHTML = '<strong>Henüz Kasa Şifresi Belirlenmedi:</strong> Verilerinizi GitHub Gist ve bu cihazda şifrelemek için aşağıdan bir kasa şifresi oluşturun.';
+      }
+    }
+    if ($('autoLockMinutesSelect')) {
+      $('autoLockMinutesSelect').value = String(securityMeta.autoLockMinutes);
+    }
+    updateSyncStatusUI();
+  }
+
+  function showVaultLockOverlay(customMsg = null) {
+    isVaultLocked = true;
+    clearTimeout(autoLockTimer);
+    $('vaultLockOverlay').hidden = false;
+    const errEl = $('vaultUnlockError');
+    if (customMsg) {
+      errEl.textContent = customMsg;
+      errEl.hidden = false;
+    } else {
+      errEl.hidden = true;
+    }
+    $('vaultUnlockPassInput').value = '';
+    setTimeout(() => $('vaultUnlockPassInput').focus(), 40);
+  }
+
+  function clearSensitiveMemoryAndDom() {
+    sessionMasterPassword = null;
+    appState = createInitialState();
+    syncConfig = { mode: 'none' };
+    activeBoxId = null;
+
+    ['boxesGrid', 'notesList', 'linksList', 'paragraphsList', 'imagesList', 'megaMenuBoxesList', 'footerBoxesLinks'].forEach((id) => {
+      if ($(id)) $(id).innerHTML = '';
+    });
+    if ($('quickScratchpad')) $('quickScratchpad').value = '';
+    if ($('ghTokenInput')) $('ghTokenInput').value = '';
+    if ($('ghGistIdInput')) $('ghGistIdInput').value = '';
+    if ($('customUrlInput')) $('customUrlInput').value = '';
+    if ($('customAuthHeaderInput')) $('customAuthHeaderInput').value = '';
+    if ($('pairingLinkOutput')) $('pairingLinkOutput').value = '';
+    if ($('pairingCodeOutput')) $('pairingCodeOutput').value = '';
+
+    closeLightbox();
+    closeBoxEditModal();
+    closeParagraphModal();
+    closeMegaMenus();
+    collapseAllCorners();
+    if ($('syncModal')) $('syncModal').hidden = true;
+    if ($('securityModal')) $('securityModal').hidden = true;
+    if ($('depoView')) $('depoView').hidden = true;
+    if ($('homeView')) $('homeView').hidden = false;
+  }
+
+  async function lockVaultNow(reasonMsg = null) {
+    if (!sessionMasterPassword && !securityMeta.enabled) return;
+    clearTimeout(cloudPushTimer);
+    cloudPushTimer = null;
+    lockedLocalEnvelope = await loadLocalStateRaw();
+    loadSyncConfigRaw();
+    clearSensitiveMemoryAndDom();
+    updateSecurityUI();
+    showVaultLockOverlay(reasonMsg);
+  }
+
+  function resetAutoLockTimer() {
+    clearTimeout(autoLockTimer);
+    if (isVaultLocked || !sessionMasterPassword) return;
+    const mins = Number(securityMeta.autoLockMinutes);
+    if (mins > 0) {
+      autoLockTimer = setTimeout(() => {
+        lockVaultNow('Hareketsizlik nedeniyle güvenlik için kasa otomatik kilitlendi.');
+      }, mins * 60 * 1000);
+    }
+  }
+
+  function openSecurityModal() {
+    updateSecurityUI();
+    $('vaultCurrentPassInput').value = '';
+    $('vaultNewPassInput').value = '';
+    $('vaultConfirmPassInput').value = '';
+    $('securityModal').hidden = false;
   }
 
   // ============================================================================
@@ -1711,12 +2027,176 @@
       navigator.clipboard?.writeText($('pairingCodeOutput').value);
       showToast('Eşleştirme kodu kopyalandı.', 'success');
     });
+    $('pastePairingCodeInput').addEventListener('input', () => {
+      const val = $('pastePairingCodeInput').value.trim();
+      $('pairingDecryptWrap').hidden = !val.startsWith('ENC1:');
+    });
     $('btnApplyPairingCode').addEventListener('click', () => {
       applyPairingCode($('pastePairingCodeInput').value);
     });
 
+    // Üst Düzey Güvenlik & Kasa Kilidi Modalı
+    $('btnOpenSecurityModal').addEventListener('click', openSecurityModal);
+    $('footerSecurityBtn').addEventListener('click', openSecurityModal);
+    $('btnCloseSecurityModal').addEventListener('click', () => ($('securityModal').hidden = true));
+    $('btnLockVaultNow').addEventListener('click', () => lockVaultNow('Kasa manuel olarak kilitlendi.'));
+
+    $('securitySetupForm').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const currentPass = $('vaultCurrentPassInput').value;
+      const newPass = $('vaultNewPassInput').value;
+      const confirmPass = $('vaultConfirmPassInput').value;
+      const autoLockMinutes = Number($('autoLockMinutesSelect').value);
+
+      if ((securityMeta.enabled || sessionMasterPassword) && currentPass !== sessionMasterPassword) {
+        showToast('Mevcut kasa şifresi hatalı!', 'error');
+        return;
+      }
+      if (newPass.length < 6) {
+        showToast('Kasa şifresi en az 6 karakter olmalıdır.', 'warn');
+        return;
+      }
+      if (newPass !== confirmPass) {
+        showToast('Yeni şifre ve tekrarı eşleşmiyor.', 'warn');
+        return;
+      }
+
+      sessionMasterPassword = newPass;
+      saveSecurityMeta({ enabled: true, autoLockMinutes });
+      await persistLocalState(false);
+      await saveSyncConfig(syncConfig);
+      if (isCloudConfigured()) {
+        await pushToCloud(false);
+      }
+      resetAutoLockTimer();
+      $('securityModal').hidden = true;
+      showToast('AES-256-GCM Uçtan Uca Şifreleme aktif edildi!', 'success', 4000);
+    });
+
+    $('btnDisableVaultLock').addEventListener('click', async () => {
+      const currentPass = $('vaultCurrentPassInput').value;
+      if (sessionMasterPassword && currentPass !== sessionMasterPassword) {
+        showToast('Şifrelemeyi kaldırmak için mevcut kasa şifrenizi girin.', 'error');
+        $('vaultCurrentPassInput').focus();
+        return;
+      }
+      if (!window.confirm('Uçtan uca şifrelemeyi kaldırmak istediğinize emin misiniz? Veriler yerel cihazda ve bulutta şifresiz saklanacaktır.')) {
+        return;
+      }
+      sessionMasterPassword = null;
+      clearTimeout(autoLockTimer);
+      saveSecurityMeta({ enabled: false, autoLockMinutes: 5 });
+      await persistLocalState(false);
+      await saveSyncConfig(syncConfig);
+      if (isCloudConfigured()) {
+        await pushToCloud(false);
+      }
+      $('securityModal').hidden = true;
+      showToast('Kasa şifresi kaldırıldı.', 'info');
+    });
+
+    // Kasa Kilit Ekranı (Unlock & Brute-Force Koruması)
+    $('vaultUnlockForm').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const errEl = $('vaultUnlockError');
+      const now = Date.now();
+      if (now < lockoutUntil) {
+        const secs = Math.ceil((lockoutUntil - now) / 1000);
+        errEl.textContent = `Çok fazla hatalı deneme! ${secs} saniye bekleyin.`;
+        errEl.hidden = false;
+        return;
+      }
+
+      const pass = $('vaultUnlockPassInput').value;
+      if (!pass) return;
+
+      try {
+        if (pendingRemoteEnvelope) {
+          const decryptedRemote = await VaultCrypto.decryptPayload(pendingRemoteEnvelope, pass);
+          sessionMasterPassword = pass;
+          appState = sanitizeState(decryptedRemote);
+          pendingRemoteEnvelope = null;
+          isVaultLocked = false;
+          saveSecurityMeta({ enabled: true, autoLockMinutes: securityMeta.autoLockMinutes });
+          await persistLocalState(false);
+          await saveSyncConfig(syncConfig);
+        } else {
+          if (lockedLocalEnvelope && VaultCrypto.isEncryptedEnvelope(lockedLocalEnvelope)) {
+            const decryptedState = await VaultCrypto.decryptPayload(lockedLocalEnvelope, pass);
+            appState = sanitizeState(decryptedState);
+          } else {
+            appState = lockedLocalEnvelope ? sanitizeState(lockedLocalEnvelope) : createInitialState();
+          }
+
+          if (lockedSyncEnvelope && VaultCrypto.isEncryptedEnvelope(lockedSyncEnvelope)) {
+            syncConfig = await VaultCrypto.decryptPayload(lockedSyncEnvelope, pass);
+            lockedSyncEnvelope = null;
+          } else {
+            syncConfig = loadSyncConfigRaw();
+          }
+
+          sessionMasterPassword = pass;
+          lockedLocalEnvelope = null;
+          isVaultLocked = false;
+        }
+
+        failedUnlockAttempts = 0;
+        lockoutUntil = 0;
+        errEl.hidden = true;
+        $('vaultUnlockPassInput').value = '';
+        $('vaultLockOverlay').hidden = true;
+
+        updateSecurityUI();
+        renderAll();
+        resetAutoLockTimer();
+        await checkUrlPairingParam();
+        if (isCloudConfigured()) {
+          pullFromCloud(false, false);
+        }
+        showToast('Kasa kilidi açıldı.', 'success');
+      } catch {
+        failedUnlockAttempts += 1;
+        if (failedUnlockAttempts >= 5) {
+          lockoutUntil = Date.now() + 30000;
+          errEl.textContent = '5 hatalı deneme! Güvenlik nedeniyle 30 saniye kilitlendi.';
+        } else {
+          errEl.textContent = `Hatalı kasa şifresi! (Kalan deneme: ${5 - failedUnlockAttempts})`;
+        }
+        errEl.hidden = false;
+        $('vaultUnlockPassInput').select();
+      }
+    });
+
+    $('btnVaultEmergencyReset').addEventListener('click', async () => {
+      if (!window.confirm('DİKKAT: Şifrenizi unuttuysanız bu cihazdaki şifreli yerel veriler silinecektir. Devam etmek istiyor musunuz?')) {
+        return;
+      }
+      if (!window.confirm('Son onay: Bu cihazdaki tüm yerel depolar ve eşleştirme bilgileri sıfırlansın mı?')) {
+        return;
+      }
+      localStorage.removeItem(LS_BACKUP_KEY);
+      localStorage.removeItem(LS_SYNC_CONFIG_KEY);
+      localStorage.removeItem(LS_SECURITY_META_KEY);
+      try {
+        await idbSet(STATE_KEY, null);
+      } catch {
+        // ignore
+      }
+      window.location.reload();
+    });
+
+    // Hareketsizlik sayacını sıfırla
+    ['pointerdown', 'keydown', 'touchstart'].forEach((evt) => {
+      window.addEventListener(evt, () => {
+        if (sessionMasterPassword && !isVaultLocked) {
+          resetAutoLockTimer();
+        }
+      }, { passive: true });
+    });
+
     // JSON Yedekleme
     $('btnExportJson').addEventListener('click', () => {
+      if (isVaultLocked) return;
       const blob = new Blob([JSON.stringify(appState, null, 2)], { type: 'application/json' });
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
@@ -1778,15 +2258,22 @@
         closeBoxEditModal();
         closeParagraphModal();
         $('syncModal').hidden = true;
+        $('securityModal').hidden = true;
         $('iosInstallModal').hidden = true;
         closeMegaMenus();
         collapseAllCorners();
       }
     });
 
-    // Sekmeye geri dönüldüğünde otomatik bulut kontrolü
+    // Sekme gizlendiğinde anında kilitleme veya görünür olunca bulut kontrolü
     document.addEventListener('visibilitychange', () => {
-      if (document.visibilityState === 'visible' && isCloudConfigured()) {
+      if (document.visibilityState === 'hidden') {
+        if (sessionMasterPassword && Number(securityMeta.autoLockMinutes) === -1) {
+          lockVaultNow('Sekme değiştirildiği için kasa güvenlik amacıyla kilitlendi.');
+        }
+        return;
+      }
+      if (document.visibilityState === 'visible' && !isVaultLocked && isCloudConfigured()) {
         pullFromCloud(false, false);
       }
     });
@@ -1807,11 +2294,22 @@
   // BAŞLATMA (BOOT)
   // ============================================================================
   async function init() {
-    appState = await loadLocalState();
+    const rawLocal = await loadLocalStateRaw();
+    const needsUnlock =
+      VaultCrypto.isEncryptedEnvelope(rawLocal) ||
+      Boolean(lockedSyncEnvelope) ||
+      securityMeta.enabled;
+
+    if (needsUnlock) {
+      lockedLocalEnvelope = rawLocal;
+      appState = createInitialState();
+    } else {
+      appState = rawLocal ? sanitizeState(rawLocal) : createInitialState();
+    }
+
     bindEvents();
     setupFreeCanvasDragAndResize();
-    updateSyncStatusUI();
-    renderAll();
+    updateSecurityUI();
 
     // Service Worker kaydı (GitHub Pages + PWA desteği)
     if ('serviceWorker' in navigator) {
@@ -1820,17 +2318,24 @@
       });
     }
 
-    // URL'de ?sync=... varsa otomatik bağlan
-    await checkUrlPairingParam();
-
-    // Eğer zaten bulut bağlıysa açılışta güncel veriyi kontrol et
-    if (isCloudConfigured()) {
-      pullFromCloud(false, false);
+    if (needsUnlock) {
+      showVaultLockOverlay();
+    } else {
+      renderAll();
+      await checkUrlPairingParam();
+      if (!isVaultLocked && isCloudConfigured()) {
+        pullFromCloud(false, false);
+      }
     }
 
-    // 30 saniyede bir arka plan senkron kontrolü
+    // 30 saniyede bir arka plan senkron kontrolü (kasa açıkken)
     cloudPullInterval = setInterval(() => {
-      if (document.visibilityState === 'visible' && isCloudConfigured() && !cloudPushTimer) {
+      if (
+        document.visibilityState === 'visible' &&
+        !isVaultLocked &&
+        isCloudConfigured() &&
+        !cloudPushTimer
+      ) {
         pullFromCloud(false, false);
       }
     }, 30000);
