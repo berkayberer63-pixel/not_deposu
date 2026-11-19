@@ -1,0 +1,658 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <meta name="theme-color" content="#FAF9F6" />
+  <meta name="description" content="DepoKutusu: Kutucuklar içine notlar, linkler, paragraflar ve resimler koyabileceğiniz, çarpışmasız köşe panolu ve cihazlar arası senkronize kişisel depo uygulaması." />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+  <meta name="apple-mobile-web-app-title" content="DepoKutusu" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=JetBrains+Mono:wght@400;500;600&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+  <link rel="icon" type="image/svg+xml" href="./icon.svg" />
+  <link rel="apple-touch-icon" href="./icon.svg" />
+  <link rel="manifest" href="./manifest.json" />
+  <title>DepoKutusu — Mimari Köşe &amp; Depo Alanım</title>
+  <link rel="stylesheet" href="./styles.css" />
+</head>
+<body>
+  <!-- NAVBAR.GALLERY İLHAMLI YÜZEN MEGA MENÜ NAVİGASYON -->
+  <header class="navbar-shell">
+    <nav class="floating-navbar" aria-label="Ana Menü">
+      <div class="nav-left">
+        <button id="btnLogoHome" class="brand-btn" type="button" title="Ana Sayfaya Dön">
+          <img src="./icon.svg" alt="DepoKutusu" class="brand-logo" />
+          <span class="brand-title">DepoKutusu</span>
+        </button>
+
+        <div class="mega-nav-items">
+          <!-- Mega Menu 1: Depolarım -->
+          <div class="mega-item">
+            <button id="navMegaBoxesBtn" class="mega-trigger" type="button" aria-expanded="false">
+              <span>Depolarım</span>
+              <svg class="chevron-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>
+            </button>
+
+            <div id="navMegaBoxesPanel" class="mega-dropdown" hidden>
+              <div class="mega-grid-2col">
+                <div class="mega-col-main">
+                  <div class="mega-col-head">
+                    <span class="mono-label">HIZLI DEPO GEÇİŞİ</span>
+                    <span id="megaMenuTotalCount" class="mono-pill">8 Depo</span>
+                  </div>
+                  <div id="megaMenuBoxesList" class="mega-boxes-list">
+                    <!-- JS doldurur -->
+                  </div>
+                </div>
+
+                <div class="mega-col-featured">
+                  <span class="mono-label">YENİ ALAN</span>
+                  <h4>Yeni Depo Kutusu Aç</h4>
+                  <p>İsim ver, rengini seç ve notlar, linkler, paragraflar ile resimlerini dört ayrı köşede sakla.</p>
+                  <button id="megaMenuNewBoxBtn" class="btn btn-dark btn-sm" type="button">
+                    + Yeni Kutucuk Ekle
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Mega Menu 2: 4 Köşe Mimarisi -->
+          <div class="mega-item">
+            <button id="navMegaCornersBtn" class="mega-trigger" type="button" aria-expanded="false">
+              <span>4 Köşe Sistemi</span>
+              <svg class="chevron-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>
+            </button>
+
+            <div id="navMegaCornersPanel" class="mega-dropdown mega-dropdown-corners" hidden>
+              <div class="mega-col-head">
+                <span class="mono-label">ÇARPIŞMASIZ KÖŞE MİMARİSİ</span>
+                <span class="mono-label">4 BAĞIMSIZ BÖLGE</span>
+              </div>
+              <div class="mega-corners-grid">
+                <button type="button" class="mega-corner-card corner-tint-amber" data-focus-corner="notes">
+                  <span class="mono-coord">01 // SOL ÜST</span>
+                  <strong>Not Kısmı</strong>
+                  <small>Otomatik kayıtlı serbest not defteri ve hızlı maddeler.</small>
+                </button>
+                <button type="button" class="mega-corner-card corner-tint-sky" data-focus-corner="links">
+                  <span class="mono-coord">02 // SAĞ ÜST</span>
+                  <strong>Linkler</strong>
+                  <small>Site ikonlu yer imi kartları ve tek tıkla kopyalama.</small>
+                </button>
+                <button type="button" class="mega-corner-card corner-tint-emerald" data-focus-corner="paragraphs">
+                  <span class="mono-coord">03 // SOL ALT</span>
+                  <strong>Paragraflar</strong>
+                  <small>Uzun yazılar, makaleler ve tam ekran okuma modu.</small>
+                </button>
+                <button type="button" class="mega-corner-card corner-tint-purple" data-focus-corner="images">
+                  <span class="mono-coord">04 // SAĞ ALT</span>
+                  <strong>Resimler</strong>
+                  <small>Sürükle-bırak, Ctrl+V yapıştır, galeri ve tam ekran önizleme.</small>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="nav-right">
+        <div id="syncStatusBadge" class="sync-badge status-local" title="Senkronizasyon durumu">
+          <span class="sync-dot"></span>
+          <span id="syncStatusText">Yerel Kayıt</span>
+        </div>
+
+        <button id="btnSyncNow" class="btn btn-ghost btn-icon-label" type="button" title="Bulut ile Şimdi Senkronize Et">
+          <svg class="svg-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/><path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16"/><path d="M16 16h5v5"/></svg>
+          <span class="btn-label">Senkronize</span>
+        </button>
+
+        <button id="btnOpenSyncModal" class="btn btn-outline-accent btn-icon-label" type="button" title="Telefon Eşleştirme &amp; Bulut Ayarları">
+          <svg class="svg-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9Z"/></svg>
+          <span class="btn-label">Cihaz Eşleştir</span>
+        </button>
+
+        <button id="btnInstallPwa" class="btn btn-dark btn-icon-label" type="button" title="Telefona / Cihaza Uygulama Olarak Kur">
+          <svg class="svg-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="14" height="20" x="5" y="2" rx="2" ry="2"/><path d="M12 18h.01"/></svg>
+          <span class="btn-label">Uygulamayı Kur</span>
+        </button>
+      </div>
+    </nav>
+  </header>
+
+  <main class="app-main">
+    <!-- GÖRÜNÜM 1: ANA SAYFA -->
+    <section id="homeView" class="view-section active">
+      <!-- SUPAHERO.IO İLHAMLI EDİTORYAL HERO SECTION -->
+      <div id="heroSection" class="supahero-block">
+        <div class="supahero-eyebrow">
+          <span class="live-ping"></span>
+          <span>4 KÖŞELİ ÇARPIŞMASIZ DEPO • GİTHUB &amp; MOBİL SENKRON</span>
+        </div>
+
+        <h1 class="supahero-title">
+          Her kutucuk ayrı bir depo,<br />
+          her köşesi <span class="serif-italic">çarpışmayan</span> özel bir alan.
+        </h1>
+
+        <p class="supahero-subtitle">
+          Ana sayfadaki <strong>+</strong> kutucuklarına tıklayarak içine gir; notlarını, linklerini, paragraflarını ve resimlerini sayfanın dört ayrı köşesinde düzenle. Bilgisayar ve telefonun arasında otomatik senkronize kalsın.
+        </p>
+
+        <div class="supahero-actions-row">
+          <div class="hero-search-pill">
+            <svg class="search-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+            <input id="boxSearchInput" type="search" placeholder="Depo kutucuklarında ara..." autocomplete="off" />
+          </div>
+
+          <button id="btnAddBox" class="btn btn-dark btn-lg" type="button">
+            <span>+</span> Yeni Kutucuk Ekle
+          </button>
+
+          <button id="btnHeroSync" class="btn btn-ghost btn-lg" type="button">
+            Telefonla Senkronize Et →
+          </button>
+        </div>
+
+        <!-- Bento Özet Şeridi -->
+        <div class="hero-bento-strip">
+          <div class="bento-stat-cell">
+            <span class="mono-label">AKTİF DEPO</span>
+            <strong id="boxCountBadge" class="bento-stat-num">8</strong>
+          </div>
+          <div class="bento-stat-cell">
+            <span class="mono-label">KAYITLI NOT</span>
+            <strong id="statTotalNotes" class="bento-stat-num">0</strong>
+          </div>
+          <div class="bento-stat-cell">
+            <span class="mono-label">TOPLAM LİNK</span>
+            <strong id="statTotalLinks" class="bento-stat-num">0</strong>
+          </div>
+          <div class="bento-stat-cell">
+            <span class="mono-label">YAZI &amp; RESİM</span>
+            <strong id="statTotalMedia" class="bento-stat-num">0</strong>
+          </div>
+        </div>
+      </div>
+
+      <!-- DEPO KUTUCUKLARI IZGARASI -->
+      <div class="grid-section-head">
+        <div>
+          <span class="mono-label">ÇALIŞMA ALANI // KUTUCUKLAR</span>
+          <h2>Depo Kutucukların</h2>
+        </div>
+        <span class="grid-hint">Açmak için bir kutucuğa tıkla, yeniden adlandırmak için kalem simgesini kullan.</span>
+      </div>
+
+      <div id="boxesGrid" class="boxes-grid" aria-live="polite">
+        <!-- Kutucuklar JS ile oluşturulur -->
+      </div>
+
+      <!-- CTA.GALLERY İLHAMLI YÜKSEK KONTRASTLI CALL-TO-ACTION BÖLÜMÜ -->
+      <section id="ctaSection" class="cta-gallery-card" aria-label="Cihaz Senkronizasyonu ve Mobil Kurulum">
+        <div class="cta-glow-orb orb-1" aria-hidden="true"></div>
+        <div class="cta-glow-orb orb-2" aria-hidden="true"></div>
+        <div class="cta-grid-overlay" aria-hidden="true"></div>
+
+        <div class="cta-inner">
+          <div class="cta-copy">
+            <span class="cta-eyebrow">GITHUB PAGES + MOBİL PWA</span>
+            <h2>Bilgisayarında depola, <span class="serif-italic">telefonunda</span> anında aç.</h2>
+            <p>Ek bir sunucu veya üyelik ücreti olmadan kendi GitHub Gist alanına bağlan; QR kodunu telefonuna okutarak tüm notlarına ve resimlerine cepten ulaş.</p>
+          </div>
+
+          <div class="cta-buttons">
+            <button id="btnCtaPair" class="btn btn-white btn-lg" type="button">
+              QR ile Telefonu Bağla →
+            </button>
+            <button id="btnCtaInstall" class="btn btn-dark-outline btn-lg" type="button">
+              Telefona Uygulama Kur
+            </button>
+            <button id="btnCtaExport" class="btn btn-dark-ghost btn-sm" type="button">
+              JSON Yedeği İndir
+            </button>
+          </div>
+        </div>
+      </section>
+    </section>
+
+    <!-- GÖRÜNÜM 2: DEPO İÇİ (4 KÖŞE / ÇARPIŞMASIZ ALAN) -->
+    <section id="depoView" class="view-section" hidden>
+      <div class="depo-topbar">
+        <div class="depo-topbar-left">
+          <button id="btnBackHome" class="btn btn-ghost btn-sm" type="button">
+            ← Tüm Kutucuklar
+          </button>
+          <div class="active-box-identity">
+            <span id="activeBoxColorDot" class="color-dot-lg"></span>
+            <h2 id="activeBoxTitle" class="active-box-title">Depo</h2>
+            <button id="btnRenameActiveBox" class="btn-mini-icon" type="button" title="Depo İsmini ve Rengini Düzenle">
+              <svg class="svg-icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/></svg>
+            </button>
+          </div>
+        </div>
+
+        <div class="depo-topbar-right">
+          <div id="layoutModeToggle" class="segmented-control" role="group" aria-label="Yerleşim Modu">
+            <button type="button" class="seg-btn active" data-layout="quadrant" title="Sayfanın 4 köşesine sabit ve eşit yerleştir">
+              4 Köşe Düzeni
+            </button>
+            <button type="button" class="seg-btn" data-layout="free" title="Köşe panellerini sürükleyip boyutlandır (çarpışmasız)">
+              Serbest Köşe Masası
+            </button>
+          </div>
+          <button id="btnSnapCorners" class="btn btn-ghost btn-sm" type="button" hidden title="Panelleri tekrar 4 köşeye simetrik yasla">
+            Köşelere Yasla
+          </button>
+        </div>
+      </div>
+
+      <!-- Mobil Hızlı Köşe Sekmeleri (< 900px) -->
+      <div id="mobileCornerTabs" class="mobile-corner-tabs">
+        <button type="button" class="mob-tab active" data-tab="all">Tümü (4 Köşe)</button>
+        <button type="button" class="mob-tab" data-tab="notes">Notlar</button>
+        <button type="button" class="mob-tab" data-tab="links">Linkler</button>
+        <button type="button" class="mob-tab" data-tab="paragraphs">Paragraflar</button>
+        <button type="button" class="mob-tab" data-tab="images">Resimler</button>
+      </div>
+
+      <!-- 4 Köşe & Kenar Konteyneri -->
+      <div id="depoCornersContainer" class="depo-corners layout-quadrant">
+        <div class="center-canvas-emblem" aria-hidden="true">
+          <span class="center-emblem-dot"></span>
+          <span id="centerEmblemTitle">Depo</span>
+        </div>
+
+        <!-- SOL ÜST KÖŞE: NOT KISMI -->
+        <article id="cornerNotes" class="corner-panel corner-notes" data-corner="notes">
+          <div class="corner-header drag-handle">
+            <div class="corner-title-wrap">
+              <span class="corner-icon-pill pill-amber">
+                <svg class="svg-icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.376 3.622a1 1 0 0 1 3.002 3.002L7.368 18.635a2 2 0 0 1-.855.506l-2.872.838a.5.5 0 0 1-.62-.62l.838-2.872a2 2 0 0 1 .506-.854z"/></svg>
+              </span>
+              <div>
+                <span class="corner-badge mono-coord">01 // SOL ÜST KÖŞE</span>
+                <h3>Not Kısmı</h3>
+              </div>
+            </div>
+            <div class="corner-actions">
+              <span id="scratchpadSavedIndicator" class="saved-tag">Otomatik kayıt</span>
+              <button type="button" class="btn-mini-icon btn-expand-corner" data-corner="notes" title="Büyüt / Küçült">⤢</button>
+            </div>
+          </div>
+
+          <div class="corner-body">
+            <div class="scratchpad-box">
+              <textarea id="quickScratchpad" rows="4" placeholder="Aklına gelen her şeyi buraya serbestçe yazabilirsin..."></textarea>
+            </div>
+
+            <form id="noteForm" class="inline-add-form">
+              <input id="noteInput" type="text" placeholder="+ Hızlı madde ekle ve Enter'a bas..." required />
+              <button type="submit" class="btn btn-sm btn-amber">Ekle</button>
+            </form>
+
+            <ul id="notesList" class="items-list notes-list"></ul>
+          </div>
+          <div class="resize-handle" data-resize="notes" title="Boyutlandır"></div>
+        </article>
+
+        <!-- SAĞ ÜST KÖŞE: LİNKLER -->
+        <article id="cornerLinks" class="corner-panel corner-links" data-corner="links">
+          <div class="corner-header drag-handle">
+            <div class="corner-title-wrap">
+              <span class="corner-icon-pill pill-sky">
+                <svg class="svg-icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
+              </span>
+              <div>
+                <span class="corner-badge mono-coord">02 // SAĞ ÜST KÖŞE</span>
+                <h3>Linkler</h3>
+              </div>
+            </div>
+            <div class="corner-actions">
+              <button type="button" class="btn btn-xs btn-sky" data-toggle-form="linkForm">+ Link Ekle</button>
+              <button type="button" class="btn-mini-icon btn-expand-corner" data-corner="links" title="Büyüt / Küçült">⤢</button>
+            </div>
+          </div>
+
+          <div class="corner-body">
+            <form id="linkForm" class="stack-form collapsible-form" hidden>
+              <div class="form-row-2">
+                <input id="linkTitleInput" type="text" placeholder="Başlık (ör. Tasarım İlhamı)" required />
+                <input id="linkUrlInput" type="text" placeholder="https://ornek.com" required />
+              </div>
+              <div class="form-row-submit">
+                <input id="linkDescInput" type="text" placeholder="Kısa açıklama (isteğe bağlı)" />
+                <button type="submit" class="btn btn-sm btn-sky">Kaydet</button>
+              </div>
+            </form>
+
+            <ul id="linksList" class="items-list links-list"></ul>
+          </div>
+          <div class="resize-handle" data-resize="links" title="Boyutlandır"></div>
+        </article>
+
+        <!-- SOL ALT KÖŞE: PARAGRAFLAR -->
+        <article id="cornerParagraphs" class="corner-panel corner-paragraphs" data-corner="paragraphs">
+          <div class="corner-header drag-handle">
+            <div class="corner-title-wrap">
+              <span class="corner-icon-pill pill-emerald">
+                <svg class="svg-icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/><path d="M10 9H8"/><path d="M16 13H8"/><path d="M16 17H8"/></svg>
+              </span>
+              <div>
+                <span class="corner-badge mono-coord">03 // SOL ALT KÖŞE</span>
+                <h3>Paragraflar</h3>
+              </div>
+            </div>
+            <div class="corner-actions">
+              <button type="button" class="btn btn-xs btn-emerald" data-toggle-form="paragraphForm">+ Paragraf Yaz</button>
+              <button type="button" class="btn-mini-icon btn-expand-corner" data-corner="paragraphs" title="Büyüt / Küçült">⤢</button>
+            </div>
+          </div>
+
+          <div class="corner-body">
+            <form id="paragraphForm" class="stack-form collapsible-form" hidden>
+              <input id="paragraphTitleInput" type="text" placeholder="Paragraf başlığı (isteğe bağlı)" />
+              <textarea id="paragraphContentInput" rows="3" placeholder="Uzun yazını, özetini veya paragrafını buraya yaz..." required></textarea>
+              <div class="form-actions-end">
+                <button type="submit" class="btn btn-sm btn-emerald">Paragrafı Kaydet</button>
+              </div>
+            </form>
+
+            <div id="paragraphsList" class="items-list paragraphs-list"></div>
+          </div>
+          <div class="resize-handle" data-resize="paragraphs" title="Boyutlandır"></div>
+        </article>
+
+        <!-- SAĞ ALT KÖŞE: RESİMLER -->
+        <article id="cornerImages" class="corner-panel corner-images" data-corner="images">
+          <div class="corner-header drag-handle">
+            <div class="corner-title-wrap">
+              <span class="corner-icon-pill pill-purple">
+                <svg class="svg-icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2" ry="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21"/></svg>
+              </span>
+              <div>
+                <span class="corner-badge mono-coord">04 // SAĞ ALT KÖŞE</span>
+                <h3>Resimler</h3>
+              </div>
+            </div>
+            <div class="corner-actions">
+              <button type="button" class="btn btn-xs btn-purple" data-toggle-form="imageUrlForm">+ URL Ekle</button>
+              <button type="button" class="btn-mini-icon btn-expand-corner" data-corner="images" title="Büyüt / Küçült">⤢</button>
+            </div>
+          </div>
+
+          <div class="corner-body">
+            <div id="imageDropZone" class="image-dropzone" tabindex="0">
+              <input id="imageFileInput" type="file" accept="image/*" multiple hidden />
+              <div class="dropzone-content">
+                <span class="dropzone-title">Resim sürükle, yapıştır (<kbd>Ctrl+V</kbd>) veya</span>
+                <button id="btnSelectImage" type="button" class="btn btn-xs btn-purple">Cihazdan Seç</button>
+              </div>
+            </div>
+
+            <form id="imageUrlForm" class="inline-add-form image-url-form collapsible-form" hidden>
+              <input id="imageTitleInput" type="text" placeholder="Resim etiketi" />
+              <input id="imageUrlInput" type="url" placeholder="https://... resim linki" required />
+              <button type="submit" class="btn btn-sm btn-purple">Ekle</button>
+            </form>
+
+            <div id="imagesList" class="images-grid"></div>
+          </div>
+          <div class="resize-handle" data-resize="images" title="Boyutlandır"></div>
+        </article>
+      </div>
+    </section>
+  </main>
+
+  <!-- FOOTER.DESIGN İLHAMLI MİMARİ FOOTER -->
+  <footer id="appFooter" class="architectural-footer">
+    <div class="footer-container">
+      <div class="footer-top-bar">
+        <div class="footer-brand-wrap">
+          <img src="./icon.svg" alt="DepoKutusu" class="brand-logo" />
+          <div>
+            <strong>DepoKutusu</strong>
+            <p>Kişisel 4 Köşeli Çarpışmasız Depo &amp; Senkronizasyon Platformu</p>
+          </div>
+        </div>
+        <div class="footer-top-right">
+          <span class="system-status-pill">
+            <span class="status-green-dot"></span>
+            Çevrimdışı &amp; Bulut Senkron Hazır
+          </span>
+          <button id="btnScrollTop" type="button" class="btn btn-ghost btn-sm">↑ Yukarı Dön</button>
+        </div>
+      </div>
+
+      <div class="footer-columns">
+        <div class="footer-col">
+          <span class="mono-label">HIZLI DEPO ERİŞİMİ</span>
+          <ul id="footerBoxesLinks" class="footer-link-list">
+            <!-- JS doldurur -->
+          </ul>
+          <button id="footerNewBoxBtn" type="button" class="footer-action-link">+ Yeni Kutucuk Ekle</button>
+        </div>
+
+        <div class="footer-col">
+          <span class="mono-label">4 KÖŞE SİSTEMİ</span>
+          <ul class="footer-link-list">
+            <li><button type="button" class="footer-link-btn" data-focus-corner="notes">01 · Sol Üst: Not Kısmı</button></li>
+            <li><button type="button" class="footer-link-btn" data-focus-corner="links">02 · Sağ Üst: Linkler</button></li>
+            <li><button type="button" class="footer-link-btn" data-focus-corner="paragraphs">03 · Sol Alt: Paragraflar</button></li>
+            <li><button type="button" class="footer-link-btn" data-focus-corner="images">04 · Sağ Alt: Resimler</button></li>
+          </ul>
+        </div>
+
+        <div class="footer-col">
+          <span class="mono-label">SENKRONİZASYON &amp; VERİ</span>
+          <ul class="footer-link-list">
+            <li><button type="button" class="footer-link-btn" data-footer-sync="github">GitHub Gist Bağlantısı</button></li>
+            <li><button type="button" class="footer-link-btn" data-footer-sync="pair">QR ile Telefon Eşleştir</button></li>
+            <li><button type="button" class="footer-link-btn" data-footer-sync="custom">Özel Bulut / Firebase</button></li>
+            <li><button type="button" class="footer-link-btn" data-footer-sync="backup">JSON Yedek Al / Yükle</button></li>
+          </ul>
+        </div>
+
+        <div class="footer-col">
+          <span class="mono-label">GÖRÜNÜM &amp; KURULUM</span>
+          <ul class="footer-link-list">
+            <li><button type="button" class="footer-link-btn" data-footer-layout="quadrant">4 Köşe Sabit Düzen</button></li>
+            <li><button type="button" class="footer-link-btn" data-footer-layout="free">Serbest Köşe Masası</button></li>
+            <li><button type="button" class="footer-link-btn" id="footerInstallBtn">Telefona Uygulama Kur (PWA)</button></li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="footer-bottom-meta">
+        <span>GitHub Pages ile sıfır sunucu kurulumunda çalışır.</span>
+        <span class="mono-label">VER 3.0 // AÇIK MİMARİ TEMA</span>
+      </div>
+
+      <div class="footer-giant-wordmark" aria-hidden="true">DEPOKUTUSU</div>
+    </div>
+  </footer>
+
+  <!-- MODAL 1: KUTUCUK OLUŞTUR / DÜZENLE -->
+  <div id="boxEditModal" class="modal-backdrop" hidden>
+    <div class="modal-card modal-sm">
+      <div class="modal-header">
+        <h3 id="boxEditModalTitle">Kutucuğu Düzenle</h3>
+        <button id="btnCloseBoxEdit" class="btn-mini-icon" type="button">✕</button>
+      </div>
+      <form id="boxEditForm" class="modal-body">
+        <label class="field-label" for="boxNameInput">Kutucuk İsmi</label>
+        <input id="boxNameInput" type="text" maxlength="40" placeholder="Örn: İş Projeleri, Fotoğraflarım..." required />
+
+        <label class="field-label" style="margin-top: 14px;">Renk Etiketi</label>
+        <div id="boxColorSwatches" class="color-swatches"></div>
+        <input id="boxColorPicker" type="hidden" value="#4F46E5" />
+
+        <div class="modal-footer">
+          <button id="btnCancelBoxEdit" type="button" class="btn btn-ghost">İptal</button>
+          <button id="btnSaveBoxEdit" type="submit" class="btn btn-dark">Kaydet</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- MODAL 2: PARAGRAF OKUMA / DÜZENLEME -->
+  <div id="paragraphReadModal" class="modal-backdrop" hidden>
+    <div class="modal-card modal-md">
+      <div class="modal-header">
+        <h3 id="paraModalHeading">Paragraf</h3>
+        <button id="btnCloseParaModal" class="btn-mini-icon" type="button">✕</button>
+      </div>
+      <div class="modal-body">
+        <label class="field-label" for="paraModalTitleInput">Başlık</label>
+        <input id="paraModalTitleInput" type="text" placeholder="Paragraf başlığı..." />
+        <label class="field-label" for="paraModalBodyInput" style="margin-top: 12px;">İçerik</label>
+        <textarea id="paraModalBodyInput" rows="10"></textarea>
+        <div class="modal-footer">
+          <button id="btnCopyParaModal" type="button" class="btn btn-ghost">Metni Kopyala</button>
+          <button id="btnSaveParaModal" type="button" class="btn btn-dark">Değişiklikleri Kaydet</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL 3: RESİM BÜYÜTME (LIGHTBOX) -->
+  <div id="lightboxModal" class="modal-backdrop lightbox-backdrop" hidden>
+    <div class="lightbox-content">
+      <button id="btnCloseLightbox" class="lightbox-close" type="button" title="Kapat">✕</button>
+      <img id="lightboxImg" src="" alt="Önizleme" />
+      <p id="lightboxCaption" class="lightbox-caption"></p>
+    </div>
+  </div>
+
+  <!-- MODAL 4: BULUT SENKRONİZASYON & TELEFON EŞLEŞTİRME -->
+  <div id="syncModal" class="modal-backdrop" hidden>
+    <div class="modal-card modal-lg">
+      <div class="modal-header">
+        <h3>Telefon &amp; Bilgisayar Senkronizasyonu</h3>
+        <button id="btnCloseSyncModal" class="btn-mini-icon" type="button">✕</button>
+      </div>
+
+      <div class="modal-body">
+        <div class="sync-tabs">
+          <button type="button" class="sync-tab active" data-sync-tab="github">GitHub Gist (Önerilen)</button>
+          <button type="button" class="sync-tab" data-sync-tab="pair">Telefona Bağla (QR / Kod)</button>
+          <button type="button" class="sync-tab" data-sync-tab="custom">Özel Bulut / Firebase</button>
+          <button type="button" class="sync-tab" data-sync-tab="backup">JSON Yedek</button>
+        </div>
+
+        <div id="syncTabGithub" class="sync-tab-panel active">
+          <div class="info-banner">
+            <strong>Nasıl Çalışır?</strong> GitHub hesabınızda sadece sizin erişebildiğiniz gizli bir <code>Gist</code> dosyası oluşturur. Bilgisayardan veya telefondan eklediğiniz tüm notlar, linkler, paragraflar ve resimler otomatik eşitlenir.
+          </div>
+
+          <label class="field-label" for="ghTokenInput">GitHub Personal Access Token (<code>gist</code> yetkili)</label>
+          <input id="ghTokenInput" type="password" placeholder="ghp_... veya github_pat_..." autocomplete="off" />
+          <p class="field-hint">
+            Token almak için: GitHub → Settings → Developer settings → Personal access tokens → Tokens (classic) → <strong>gist</strong> kutucuğunu işaretleyip oluşturun.
+          </p>
+
+          <label class="field-label" for="ghGistIdInput" style="margin-top: 12px;">Mevcut Gist ID (İlk kurulumda boş bırakın)</label>
+          <input id="ghGistIdInput" type="text" placeholder="Otomatik oluşturulur veya diğer cihazdaki ID'yi girin" />
+
+          <div class="modal-footer-split">
+            <button id="btnDisconnectSync" type="button" class="btn btn-danger-soft">Bağlantıyı Kes</button>
+            <button id="btnConnectGithub" type="button" class="btn btn-dark">GitHub ile Bağla &amp; Senkronize Et</button>
+          </div>
+        </div>
+
+        <div id="syncTabPair" class="sync-tab-panel" hidden>
+          <div id="pairNotConfiguredMsg" class="info-banner warn" hidden>
+            Önce <strong>GitHub Gist</strong> veya <strong>Özel Bulut</strong> sekmesinden senkronizasyonu aktif edin; ardından telefonunuzu tek tıkla eşleştirecek QR Kod ve Link burada oluşacaktır.
+          </div>
+
+          <div id="pairReadyArea">
+            <p class="field-hint" style="margin-bottom: 12px;">
+              Aşağıdaki QR kodu telefon kameranızla okutun veya eşleştirme linkini telefonunuza gönderip açın. Telefonunuzdaki uygulama anında senkronize olur!
+            </p>
+            <div class="pair-grid">
+              <div class="qr-box">
+                <img id="pairingQrImg" alt="Telefon Eşleştirme QR Kodu" />
+                <span>Telefonla Okut</span>
+              </div>
+              <div class="pair-codes">
+                <label class="field-label">Tek Tıkla Eşleştirme Linki</label>
+                <div class="copy-row">
+                  <input id="pairingLinkOutput" type="text" readonly />
+                  <button id="btnCopyPairingLink" type="button" class="btn btn-sm btn-dark">Kopyala</button>
+                </div>
+
+                <label class="field-label" style="margin-top: 12px;">Eşleştirme Kodu</label>
+                <div class="copy-row">
+                  <input id="pairingCodeOutput" type="text" readonly />
+                  <button id="btnCopyPairingCode" type="button" class="btn btn-sm btn-ghost">Kopyala</button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <hr class="divider" />
+          <label class="field-label" for="pastePairingCodeInput">Bu cihaza başka bir cihazdan aldığın Eşleştirme Kodunu gir:</label>
+          <div class="copy-row">
+            <input id="pastePairingCodeInput" type="text" placeholder="Eşleştirme kodunu buraya yapıştır..." />
+            <button id="btnApplyPairingCode" type="button" class="btn btn-sm btn-dark">Cihazı Bağla</button>
+          </div>
+        </div>
+
+        <div id="syncTabCustom" class="sync-tab-panel" hidden>
+          <div class="info-banner">
+            Firebase Realtime Database (ör. <code>https://proje-default-rtdb.firebaseio.com/depokutusu.json</code>) veya <code>GET</code> / <code>PUT</code> destekleyen herhangi bir JSON REST adresi kullanabilirsiniz.
+          </div>
+          <label class="field-label" for="customUrlInput">Bulut JSON Endpoint URL</label>
+          <input id="customUrlInput" type="url" placeholder="https://...firebaseio.com/depokutusu.json" />
+
+          <label class="field-label" for="customAuthHeaderInput" style="margin-top: 12px;">Opsiyonel Authorization / API Key Header</label>
+          <input id="customAuthHeaderInput" type="password" placeholder="İsteğe bağlı (ör. Bearer ...)" />
+
+          <div class="modal-footer-split">
+            <button id="btnDisconnectCustom" type="button" class="btn btn-danger-soft">Bağlantıyı Kes</button>
+            <button id="btnConnectCustom" type="button" class="btn btn-dark">Özel Buluta Bağlan</button>
+          </div>
+        </div>
+
+        <div id="syncTabBackup" class="sync-tab-panel" hidden>
+          <div class="info-banner">
+            Tüm kutucuklarınızı, notlarınızı, linklerinizi, paragraflarınızı ve resimlerinizi tek bir <code>.json</code> dosyası olarak indirebilir veya geri yükleyebilirsiniz.
+          </div>
+          <div class="backup-actions">
+            <button id="btnExportJson" type="button" class="btn btn-dark">Tüm Verileri JSON İndir</button>
+            <label class="btn btn-ghost file-btn">
+              JSON Dosyasından Geri Yükle
+              <input id="importJsonInput" type="file" accept="application/json,.json" hidden />
+            </label>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL 5: TELEFONA UYGULAMA KURULUM BİLGİSİ -->
+  <div id="iosInstallModal" class="modal-backdrop" hidden>
+    <div class="modal-card modal-sm">
+      <div class="modal-header">
+        <h3>Telefonuna Uygulama Olarak Kur</h3>
+        <button id="btnCloseIosModal" class="btn-mini-icon" type="button">✕</button>
+      </div>
+      <div class="modal-body install-guide">
+        <p><strong>Android (Chrome):</strong> Sağ üstteki <code>⋮</code> menüsüne dokunup <strong>"Ana ekrana ekle"</strong> veya <strong>"Uygulamayı yükle"</strong> seçeneğini seçin.</p>
+        <p><strong>iPhone / iPad (Safari):</strong> Alt bardaki <strong>Paylaş</strong> simgesine dokunun ve <strong>"Ana Ekrana Ekle"</strong> deyin.</p>
+        <p><strong>Masaüstü (Chrome / Edge):</strong> Adres çubuğunun sağındaki <strong>Yükle</strong> simgesine tıklayın.</p>
+        <div class="modal-footer">
+          <button id="btnOkIosModal" type="button" class="btn btn-dark">Anladım</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- BİLDİRİM TOAST KONTEYNERİ -->
+  <div id="toastContainer" class="toast-container" aria-live="polite"></div>
+
+  <script src="./app.js"></script>
+</body>
+</html>
