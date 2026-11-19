@@ -7,6 +7,7 @@
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: https:; connect-src 'self' https://api.github.com https://*.githubusercontent.com https:; object-src 'none'; base-uri 'self';" />
   <meta name="theme-color" content="#FAF9F6" />
   <meta name="description" content="DepoKutusu: Kutucuklar içine notlar, linkler, paragraflar ve resimler koyabileceğiniz, AES-256-GCM uçtan uca şifrelemeli kişisel depo uygulaması." />
+  <meta name="mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="default" />
   <meta name="apple-mobile-web-app-title" content="DepoKutusu" />
@@ -16,7 +17,7 @@
   <link rel="icon" type="image/svg+xml" href="./icon.svg" />
   <link rel="icon" type="image/png" sizes="192x192" href="./icon-192.png" />
   <link rel="apple-touch-icon" href="./icon-192.png" />
-  <link rel="manifest" href="./manifest.json?v=5" />
+  <link rel="manifest" href="./manifest.json?v=9" />
   <title>DepoKutusu — Mimari Köşe &amp; Şifreli Depo Alanım</title>
   <link rel="stylesheet" href="./styles.css" />
 </head>
@@ -320,12 +321,12 @@
 
           <div class="corner-body">
             <div class="scratchpad-box">
-              <textarea id="quickScratchpad" rows="4" placeholder="Aklına gelen her şeyi buraya serbestçe yazabilirsin..."></textarea>
+              <textarea id="quickScratchpad" rows="4" placeholder="Not içeriğini buraya yaz, aşağıdan isim verip kaydet..."></textarea>
             </div>
 
             <form id="noteForm" class="inline-add-form">
-              <input id="noteInput" type="text" placeholder="+ Hızlı madde ekle ve Enter'a bas..." required />
-              <button type="submit" class="btn btn-sm btn-amber">Ekle</button>
+              <input id="noteInput" type="text" placeholder="Not adı / başlığı..." />
+              <button type="submit" class="btn btn-sm btn-amber">Notu Kaydet</button>
             </form>
 
             <ul id="notesList" class="items-list notes-list"></ul>
@@ -426,6 +427,21 @@
                 <button id="btnSelectImage" type="button" class="btn btn-xs btn-purple">Cihazdan Seç</button>
               </div>
             </div>
+
+            <form id="imagePendingForm" class="pending-image-card" hidden>
+              <div class="pending-image-head">
+                <span class="mono-label">RESME İSİM VER</span>
+                <span id="pendingImageCountBadge" class="mono-pill" hidden></span>
+              </div>
+              <div class="pending-image-top">
+                <input id="pendingImageNameInput" type="text" maxlength="60" placeholder="Resmin üstüne isim yaz..." />
+                <button id="btnConfirmPendingImage" type="submit" class="btn btn-sm btn-purple">Resmi Kaydet</button>
+                <button id="btnCancelPendingImage" type="button" class="btn btn-sm btn-ghost">İptal</button>
+              </div>
+              <div class="pending-image-preview-wrap">
+                <img id="pendingImagePreview" alt="Seçilen resim önizlemesi" />
+              </div>
+            </form>
 
             <form id="imageUrlForm" class="inline-add-form image-url-form collapsible-form" hidden>
               <input id="imageTitleInput" type="text" placeholder="Resim etiketi" />
@@ -550,11 +566,34 @@
     </div>
   </div>
 
+  <!-- MODAL 2B: NOT İÇERİĞİ / DÜZENLEME -->
+  <div id="noteEditModal" class="modal-backdrop" hidden>
+    <div class="modal-card modal-md">
+      <div class="modal-header">
+        <div class="note-modal-head-left">
+          <h3 id="noteModalHeading">Not</h3>
+          <span id="noteModalSavedTag" class="saved-tag">Otomatik kayıt</span>
+        </div>
+        <button id="btnCloseNoteModal" class="btn-mini-icon" type="button">✕</button>
+      </div>
+      <div class="modal-body">
+        <label class="field-label" for="noteModalTitleInput">Not Başlığı / Adı</label>
+        <input id="noteModalTitleInput" type="text" placeholder="Not adı..." />
+        <label class="field-label" for="noteModalContentInput" style="margin-top: 12px;">Not İçeriği</label>
+        <textarea id="noteModalContentInput" rows="10" placeholder="Bu notun içine istediğin detayları yazabilirsin..."></textarea>
+        <div class="modal-footer">
+          <button id="btnCopyNoteModal" type="button" class="btn btn-ghost">İçeriği Kopyala</button>
+          <button id="btnSaveNoteModal" type="button" class="btn btn-dark">Kaydet ve Kapat</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <!-- MODAL 3: RESİM BÜYÜTME (LIGHTBOX) -->
   <div id="lightboxModal" class="modal-backdrop lightbox-backdrop" hidden>
     <div class="lightbox-content">
       <button id="btnCloseLightbox" class="lightbox-close" type="button" title="Kapat">✕</button>
-      <img id="lightboxImg" src="" alt="Önizleme" />
+      <img id="lightboxImg" alt="Önizleme" />
       <p id="lightboxCaption" class="lightbox-caption"></p>
     </div>
   </div>

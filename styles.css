@@ -155,6 +155,7 @@ body {
   position: relative;
   height: 62px;
   background: rgba(255, 255, 255, 0.9);
+  -webkit-backdrop-filter: blur(18px);
   backdrop-filter: blur(18px);
   border: 1px solid var(--border);
   border-radius: 16px;
@@ -744,6 +745,7 @@ textarea { resize: vertical; }
   cursor: pointer;
   transition: transform 0.22s cubic-bezier(0.22, 1, 0.36, 1), box-shadow 0.22s ease, border-color 0.22s ease;
   box-shadow: var(--shadow-card);
+  contain: layout style;
 }
 .box-card:hover {
   transform: translateY(-5px);
@@ -886,27 +888,28 @@ textarea { resize: vertical; }
   overflow: hidden;
   border: 1px solid #27272A;
   box-shadow: 0 24px 60px -15px rgba(9, 9, 11, 0.25);
+  content-visibility: auto;
+  contain-intrinsic-size: auto 340px;
 }
 
 .cta-glow-orb {
   position: absolute;
   border-radius: 50%;
-  filter: blur(75px);
   pointer-events: none;
 }
 .cta-glow-orb.orb-1 {
-  width: 340px;
-  height: 340px;
-  top: -120px;
-  right: -60px;
-  background: rgba(79, 70, 229, 0.42);
+  width: 520px;
+  height: 520px;
+  top: -210px;
+  right: -130px;
+  background: radial-gradient(circle, rgba(79, 70, 229, 0.42) 0%, rgba(79, 70, 229, 0) 70%);
 }
 .cta-glow-orb.orb-2 {
-  width: 260px;
-  height: 260px;
-  bottom: -120px;
-  left: 8%;
-  background: rgba(124, 58, 237, 0.28);
+  width: 420px;
+  height: 420px;
+  bottom: -200px;
+  left: 2%;
+  background: radial-gradient(circle, rgba(124, 58, 237, 0.3) 0%, rgba(124, 58, 237, 0) 70%);
 }
 .cta-grid-overlay {
   position: absolute;
@@ -915,6 +918,7 @@ textarea { resize: vertical; }
     linear-gradient(to right, rgba(255, 255, 255, 0.05) 1px, transparent 1px),
     linear-gradient(to bottom, rgba(255, 255, 255, 0.05) 1px, transparent 1px);
   background-size: 36px 36px;
+  -webkit-mask-image: radial-gradient(circle at 75% 40%, black 20%, transparent 80%);
   mask-image: radial-gradient(circle at 75% 40%, black 20%, transparent 80%);
   pointer-events: none;
 }
@@ -1120,6 +1124,7 @@ textarea { resize: vertical; }
   min-width: 0;
   min-height: 0;
   position: relative;
+  contain: layout style;
 }
 
 .depo-corners.layout-free .corner-panel {
@@ -1267,9 +1272,34 @@ textarea { resize: vertical; }
   align-items: flex-start;
   justify-content: space-between;
   gap: 10px;
-  transition: border-color 0.15s ease, background 0.15s ease;
+  transition: border-color 0.15s ease, background 0.15s ease, box-shadow 0.15s ease;
 }
 .item-card:hover { background: #FFFFFF; border-color: var(--border-strong); }
+.clickable-card {
+  cursor: pointer;
+}
+.clickable-card:hover {
+  border-color: var(--border-strong);
+  box-shadow: 0 4px 12px rgba(9, 9, 11, 0.05);
+}
+.note-item-title {
+  font-weight: 700;
+  color: var(--text);
+  word-break: break-word;
+}
+.note-preview-sub {
+  font-size: 0.79rem;
+  color: var(--text-secondary);
+  margin-top: 3px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.note-modal-head-left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
 .item-card-content { min-width: 0; flex: 1; font-size: 0.88rem; }
 .item-card-actions { display: flex; gap: 4px; flex-shrink: 0; }
 .item-meta { font-size: 0.72rem; color: var(--text-muted); margin-top: 3px; }
@@ -1299,6 +1329,7 @@ textarea { resize: vertical; }
   word-break: break-word;
   display: -webkit-box;
   -webkit-line-clamp: 3;
+  line-clamp: 3;
   -webkit-box-orient: vertical;
   overflow: hidden;
 }
@@ -1321,7 +1352,46 @@ kbd {
 }
 
 .image-url-form { display: grid; grid-template-columns: 1fr 1.4fr auto; gap: 6px; }
-.images-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 10px; }
+.pending-image-card {
+  background: var(--purple-bg);
+  border: 1.5px solid var(--purple-border);
+  border-radius: var(--radius-md);
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.pending-image-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.pending-image-top {
+  display: flex;
+  gap: 7px;
+  flex-wrap: wrap;
+}
+.pending-image-top input {
+  flex: 1;
+  min-width: 150px;
+}
+.pending-image-preview-wrap {
+  background: #FFFFFF;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 6px;
+  display: flex;
+  justify-content: center;
+}
+.pending-image-preview-wrap img {
+  max-width: 100%;
+  max-height: 150px;
+  object-fit: contain;
+  border-radius: 6px;
+  display: block;
+}
+
+.images-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(138px, 1fr)); gap: 10px; }
 .image-tile {
   background: var(--surface);
   border: 1px solid var(--border);
@@ -1329,10 +1399,46 @@ kbd {
   overflow: hidden;
   display: flex;
   flex-direction: column;
+  box-shadow: 0 2px 6px rgba(9, 9, 11, 0.04);
 }
-.image-tile img { width: 100%; height: 104px; object-fit: cover; cursor: zoom-in; display: block; }
-.image-tile-foot { padding: 6px 8px; display: flex; align-items: center; justify-content: space-between; gap: 6px; }
-.image-tile-title { font-size: 0.74rem; font-weight: 500; color: var(--text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.image-tile-head {
+  padding: 7px 8px;
+  background: var(--bg);
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+}
+.image-tile-title {
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: pointer;
+  flex: 1;
+  min-width: 0;
+}
+.image-tile-title:hover { color: var(--purple); }
+.image-tile-actions {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  flex-shrink: 0;
+}
+.image-tile-actions .btn-mini-icon {
+  width: 24px;
+  height: 24px;
+  border-radius: 6px;
+}
+.inline-rename-input {
+  padding: 4px 6px !important;
+  font-size: 0.76rem !important;
+  height: 26px;
+}
+.image-tile img { width: 100%; height: 112px; object-fit: cover; cursor: zoom-in; display: block; }
 
 .empty-placeholder {
   text-align: center;
@@ -1353,6 +1459,8 @@ kbd {
   margin-top: 32px;
   padding: 48px 24px 20px;
   overflow: hidden;
+  content-visibility: auto;
+  contain-intrinsic-size: auto 440px;
 }
 .footer-container {
   max-width: 1440px;
@@ -1484,6 +1592,7 @@ kbd {
   inset: 0;
   z-index: 100;
   background: rgba(9, 9, 11, 0.45);
+  -webkit-backdrop-filter: blur(5px);
   backdrop-filter: blur(5px);
   display: flex;
   align-items: center;

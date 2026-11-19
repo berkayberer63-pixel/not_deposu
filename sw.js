@@ -1,4 +1,4 @@
-const CACHE_NAME = 'depokutusu-v5';
+const CACHE_NAME = 'depokutusu-v9';
 const APP_SHELL = [
   './',
   './index.html',
@@ -41,15 +41,35 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
+  // HTML navigasyonları için Network-First (güncel kalma), statik dosyalar için Stale-While-Revalidate (anında açılış)
+  if (request.mode === 'navigate' || request.destination === 'document') {
+    event.respondWith(
+      fetch(request)
+        .then((networkResponse) => {
+          if (networkResponse && networkResponse.ok) {
+            const clone = networkResponse.clone();
+            caches.open(CACHE_NAME).then((cache) => cache.put(request, clone));
+          }
+          return networkResponse;
+        })
+        .catch(() => caches.match(request).then((cached) => cached || caches.match('./index.html')))
+    );
+    return;
+  }
+
   event.respondWith(
-    fetch(request)
-      .then((networkResponse) => {
-        if (networkResponse && networkResponse.ok) {
-          const clone = networkResponse.clone();
-          caches.open(CACHE_NAME).then((cache) => cache.put(request, clone));
-        }
-        return networkResponse;
-      })
-      .catch(() => caches.match(request).then((cached) => cached || caches.match('./index.html')))
+    caches.match(request).then((cachedResponse) => {
+      const networkFetch = fetch(request)
+        .then((networkResponse) => {
+          if (networkResponse && networkResponse.ok) {
+            const clone = networkResponse.clone();
+            caches.open(CACHE_NAME).then((cache) => cache.put(request, clone));
+          }
+          return networkResponse;
+        })
+        .catch(() => cachedResponse);
+
+      return cachedResponse || networkFetch;
+    })
   );
 });

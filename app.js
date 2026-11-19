@@ -32,31 +32,24 @@
   const SVG_OPEN = '<svg class="svg-icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg>';
 
   // ============================================================================
-  // UYGULAMA DURUMU (STATE) & GÜVENLİK OTURUMU
+  // WEB CRYPTO API (AES-256-GCM + PBKDF2-SHA256 E2EE + OTURUM ANAHTAR ÖNBELLEĞİ)
   // ============================================================================
-  let appState = null;
-  let securityMeta = loadSecurityMeta();
-  let sessionMasterPassword = null; // Asla diske yazılmaz, sadece RAM'de tutulur
-  let isVaultLocked = false;
-  let lockedLocalEnvelope = null;
-  let lockedSyncEnvelope = null;
-  let pendingRemoteEnvelope = null;
-  let autoLockTimer = null;
-  let failedUnlockAttempts = 0;
-  let lockoutUntil = 0;
-  let syncConfig = loadSyncConfigRaw();
-  let activeBoxId = null;
-  let editingBoxId = null; // null => yeni kutu oluşturma, string => düzenleme
-  let editingParaContext = null; // { boxId, paraId }
-  let deferredInstallPrompt = null;
-  let cloudPushTimer = null;
-  let cloudPullInterval = null;
-  let isSyncing = false;
-  let activeMobileCorner = 'all';
+  let sessionCryptoCache = {
+    password: null,
+    encSaltB64: null,
+    encKey: null,
+    decKeyCache: new Map()
+  };
 
-  // ============================================================================
-  // WEB CRYPTO API (AES-256-GCM + PBKDF2-SHA256 E2EE)
-  // ============================================================================
+  function clearSessionCryptoCache() {
+    sessionCryptoCache = {
+      password: null,
+      encSaltB64: null,
+      encKey: null,
+      decKeyCache: new Map()
+    };
+  }
+
   const VaultCrypto = {
     bufToBase64(buf) {
       const bytes = buf instanceof Uint8Array ? buf : new Uint8Array(buf);
@@ -111,9 +104,20 @@
       );
     },
     async encryptPayload(plainObj, password) {
-      const salt = window.crypto.getRandomValues(new Uint8Array(16));
+      let key;
+      let saltB64;
+      if (sessionCryptoCache.password === password && sessionCryptoCache.encKey && sessionCryptoCache.encSaltB64) {
+        key = sessionCryptoCache.encKey;
+        saltB64 = sessionCryptoCache.encSaltB64;
+      } else {
+        const salt = window.crypto.getRandomValues(new Uint8Array(16));
+        saltB64 = this.bufToBase64(salt);
+        key = await this.deriveAesKey(password, salt, PBKDF2_ITERATIONS);
+        sessionCryptoCache.password = password;
+        sessionCryptoCache.encSaltB64 = saltB64;
+        sessionCryptoCache.encKey = key;
+      }
       const iv = window.crypto.getRandomValues(new Uint8Array(12));
-      const key = await this.deriveAesKey(password, salt, PBKDF2_ITERATIONS);
       const encoded = new TextEncoder().encode(JSON.stringify(plainObj));
       const encrypted = await window.crypto.subtle.encrypt(
         { name: 'AES-GCM', iv },
@@ -126,16 +130,22 @@
         alg: 'AES-256-GCM',
         kdf: 'PBKDF2-SHA256',
         iter: PBKDF2_ITERATIONS,
-        salt: this.bufToBase64(salt),
+        salt: saltB64,
         iv: this.bufToBase64(iv),
         cipher: this.bufToBase64(encrypted)
       };
     },
     async decryptPayload(envelope, password) {
-      const salt = this.base64ToBuf(envelope.salt);
+      const iter = Number(envelope.iter) || PBKDF2_ITERATIONS;
+      const cacheKey = `${password}::${envelope.salt}::${iter}`;
+      let key = sessionCryptoCache.decKeyCache.get(cacheKey);
+      if (!key) {
+        const salt = this.base64ToBuf(envelope.salt);
+        key = await this.deriveAesKey(password, salt, iter);
+        sessionCryptoCache.decKeyCache.set(cacheKey, key);
+      }
       const iv = this.base64ToBuf(envelope.iv);
       const cipher = this.base64ToBuf(envelope.cipher);
-      const key = await this.deriveAesKey(password, salt, Number(envelope.iter) || PBKDF2_ITERATIONS);
       const decrypted = await window.crypto.subtle.decrypt(
         { name: 'AES-GCM', iv },
         key,
@@ -144,6 +154,32 @@
       return JSON.parse(new TextDecoder().decode(decrypted));
     }
   };
+
+  // ============================================================================
+  // UYGULAMA DURUMU (STATE) & GÜVENLİK OTURUMU
+  // ============================================================================
+  let appState = null;
+  let securityMeta = { enabled: false, autoLockMinutes: 5 };
+  let sessionMasterPassword = null; // Asla diske yazılmaz, sadece RAM'de tutulur
+  let isVaultLocked = false;
+  let lockedLocalEnvelope = null;
+  let lockedSyncEnvelope = null;
+  let pendingRemoteEnvelope = null;
+  let autoLockTimer = null;
+  let failedUnlockAttempts = 0;
+  let lockoutUntil = 0;
+  let syncConfig = { mode: 'none' };
+  let activeBoxId = null;
+  let editingBoxId = null; // null => yeni kutu oluşturma, string => düzenleme
+  let editingParaContext = null; // { boxId, paraId }
+  let editingNoteContext = null; // { boxId, noteId }
+  let pendingImages = []; // [{ defaultTitle, dataUrl }]
+  let deferredInstallPrompt = null;
+  let localPersistTimer = null;
+  let cloudPushTimer = null;
+  let cloudPullInterval = null;
+  let isSyncing = false;
+  let activeMobileCorner = 'all';
 
   function loadSecurityMeta() {
     try {
@@ -327,9 +363,13 @@
   // ============================================================================
   // YEREL DEPOLAMA (IndexedDB + localStorage Yedek)
   // ============================================================================
+  let cachedDbPromise = null;
+
   function openDatabase() {
-    return new Promise((resolve, reject) => {
+    if (cachedDbPromise) return cachedDbPromise;
+    cachedDbPromise = new Promise((resolve, reject) => {
       if (!('indexedDB' in window)) {
+        cachedDbPromise = null;
         reject(new Error('IndexedDB desteklenmiyor'));
         return;
       }
@@ -340,9 +380,17 @@
           db.createObjectStore(STORE_NAME);
         }
       };
-      req.onsuccess = () => resolve(req.result);
-      req.onerror = () => reject(req.error);
+      req.onsuccess = () => {
+        const db = req.result;
+        db.onclose = () => { cachedDbPromise = null; };
+        resolve(db);
+      };
+      req.onerror = () => {
+        cachedDbPromise = null;
+        reject(req.error);
+      };
     });
+    return cachedDbPromise;
   }
 
   async function idbGet(key) {
@@ -399,13 +447,20 @@
         return;
       }
     }
+    let idbSaved = false;
     try {
       await idbSet(STATE_KEY, payloadToStore);
+      idbSaved = true;
     } catch (err) {
       console.warn('IndexedDB yazma hatası:', err);
     }
     try {
-      localStorage.setItem(LS_BACKUP_KEY, JSON.stringify(payloadToStore));
+      const serialized = JSON.stringify(payloadToStore);
+      if (serialized.length < 250000 || !idbSaved) {
+        localStorage.setItem(LS_BACKUP_KEY, serialized);
+      } else {
+        localStorage.removeItem(LS_BACKUP_KEY);
+      }
     } catch (err) {
       console.warn('localStorage yedek sınırı:', err);
     }
@@ -413,10 +468,15 @@
 
   function saveStateAndSync() {
     if (isVaultLocked) return;
+    appState.isPristineDefault = false;
+    appState.updatedAt = Date.now();
     updateGlobalStatsAndNav();
-    persistLocalState(true).then(() => {
-      scheduleCloudPush();
-    });
+    clearTimeout(localPersistTimer);
+    localPersistTimer = setTimeout(() => {
+      persistLocalState(false).then(() => {
+        scheduleCloudPush();
+      });
+    }, 200);
   }
 
   // ============================================================================
@@ -845,6 +905,9 @@
 
   function clearSensitiveMemoryAndDom() {
     sessionMasterPassword = null;
+    clearSessionCryptoCache();
+    clearTimeout(localPersistTimer);
+    localPersistTimer = null;
     appState = createInitialState();
     syncConfig = { mode: 'none' };
     activeBoxId = null;
@@ -863,6 +926,8 @@
     closeLightbox();
     closeBoxEditModal();
     closeParagraphModal();
+    closeNoteModal();
+    clearPendingImages();
     closeMegaMenus();
     collapseAllCorners();
     if ($('syncModal')) $('syncModal').hidden = true;
@@ -934,7 +999,7 @@
 
     const megaList = $('megaMenuBoxesList');
     if (megaList) {
-      megaList.innerHTML = '';
+      const megaFrag = document.createDocumentFragment();
       appState.boxes.forEach((box) => {
         const btn = document.createElement('button');
         btn.type = 'button';
@@ -947,13 +1012,14 @@
           closeMegaMenus();
           openDepoView(box.id);
         });
-        megaList.appendChild(btn);
+        megaFrag.appendChild(btn);
       });
+      megaList.replaceChildren(megaFrag);
     }
 
     const footerLinks = $('footerBoxesLinks');
     if (footerLinks) {
-      footerLinks.innerHTML = '';
+      const footerFrag = document.createDocumentFragment();
       appState.boxes.slice(0, 5).forEach((box) => {
         const li = document.createElement('li');
         const btn = document.createElement('button');
@@ -962,8 +1028,9 @@
         btn.textContent = box.name;
         btn.addEventListener('click', () => openDepoView(box.id));
         li.appendChild(btn);
-        footerLinks.appendChild(li);
+        footerFrag.appendChild(li);
       });
+      footerLinks.replaceChildren(footerFrag);
     }
   }
 
@@ -976,7 +1043,7 @@
       b.name.toLowerCase().includes(query)
     );
 
-    grid.innerHTML = '';
+    const gridFrag = document.createDocumentFragment();
 
     filtered.forEach((box, idx) => {
       const noteCount = box.notes.length + (box.scratchpad.trim() ? 1 : 0);
@@ -1042,7 +1109,7 @@
         }
       });
 
-      grid.appendChild(card);
+      gridFrag.appendChild(card);
     });
 
     // Izgara sonunda her zaman "+ Daha Fazla Kutucuk Ekle" kartı
@@ -1054,27 +1121,43 @@
       <span>Daha Fazla Kutucuk Ekle</span>
     `;
     addCard.addEventListener('click', () => openBoxEditModal(null));
-    grid.appendChild(addCard);
+    gridFrag.appendChild(addCard);
+
+    grid.replaceChildren(gridFrag);
   }
 
-  function openDepoView(boxId) {
+  function openDepoView(boxId, { pushHistory = true } = {}) {
     activeBoxId = boxId;
     const box = getActiveBox();
     if (!box) return;
+    clearPendingImages();
     $('linkForm').hidden = true;
     $('paragraphForm').hidden = true;
     $('imageUrlForm').hidden = true;
     $('homeView').hidden = true;
     $('depoView').hidden = false;
+
+    if (pushHistory && (!history.state || history.state.view !== 'depo' || history.state.boxId !== boxId)) {
+      history.pushState({ view: 'depo', boxId }, '', `#depo-${encodeURIComponent(boxId)}`);
+    }
+
     window.scrollTo({ top: 0, behavior: 'smooth' });
     renderDepoView();
   }
 
-  function closeDepoView() {
+  function closeDepoView({ fromPopState = false } = {}) {
+    if (!fromPopState && history.state && history.state.view === 'depo') {
+      history.back();
+      return;
+    }
     activeBoxId = null;
+    clearPendingImages();
     collapseAllCorners();
     $('depoView').hidden = true;
     $('homeView').hidden = false;
+    if (window.location.hash.startsWith('#depo-')) {
+      history.replaceState({ view: 'home' }, '', `${window.location.pathname}${window.location.search}`);
+    }
     renderHomeGrid();
   }
 
@@ -1111,30 +1194,47 @@
   function renderNotesList(box) {
     const list = $('notesList');
     if (!box.notes.length) {
-      list.innerHTML = '<li class="empty-placeholder">Henüz maddeli kısa not yok.</li>';
+      list.innerHTML = '<li class="empty-placeholder">Henüz not eklenmedi. Yukarıdan not adı yazıp ekleyin.</li>';
       return;
     }
-    list.innerHTML = '';
+    const frag = document.createDocumentFragment();
     box.notes.forEach((note) => {
+      const noteTitle = note.title || note.text || 'Adsız Not';
+      const noteContent = note.content || '';
       const li = document.createElement('li');
-      li.className = 'item-card';
+      li.className = 'item-card clickable-card';
+      li.setAttribute('tabindex', '0');
       li.innerHTML = `
         <div class="item-card-content">
-          <div>${escapeHtml(note.text)}</div>
-          <div class="item-meta">${formatDate(note.createdAt)}</div>
+          <div class="note-item-title">${escapeHtml(noteTitle)}</div>
+          ${noteContent ? `<div class="note-preview-sub">${escapeHtml(noteContent)}</div>` : ''}
+          <div class="item-meta">${formatDate(note.updatedAt || note.createdAt)} · Açmak için tıklayın</div>
         </div>
         <div class="item-card-actions">
+          <button type="button" class="btn-mini-icon btn-open-note" title="Notu Aç / Düzenle">${SVG_EDIT}</button>
           <button type="button" class="btn-mini-icon danger btn-del" title="Sil">${SVG_TRASH}</button>
         </div>
       `;
-      li.querySelector('.btn-del').addEventListener('click', () => {
-        box.notes = box.notes.filter((n) => n.id !== note.id);
-        box.updatedAt = Date.now();
-        renderNotesList(box);
-        saveStateAndSync();
+      li.addEventListener('click', (e) => {
+        if (e.target.closest('.btn-del')) {
+          e.stopPropagation();
+          box.notes = box.notes.filter((n) => n.id !== note.id);
+          box.updatedAt = Date.now();
+          renderNotesList(box);
+          saveStateAndSync();
+          return;
+        }
+        openNoteModal(box.id, note.id);
       });
-      list.appendChild(li);
+      li.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          openNoteModal(box.id, note.id);
+        }
+      });
+      frag.appendChild(li);
     });
+    list.replaceChildren(frag);
   }
 
   function renderLinksList(box) {
@@ -1143,7 +1243,7 @@
       list.innerHTML = '<li class="empty-placeholder">Bu köşeye henüz link eklenmedi. Yukarıdaki "+ Link Ekle" butonunu kullanabilirsiniz.</li>';
       return;
     }
-    list.innerHTML = '';
+    const frag = document.createDocumentFragment();
     box.links.forEach((link) => {
       const domain = extractDomain(link.url);
       const faviconUrl = `https://www.google.com/s2/favicons?domain=${encodeURIComponent(domain)}&sz=64`;
@@ -1152,7 +1252,7 @@
       li.innerHTML = `
         <div class="item-card-content">
           <div class="link-row-head">
-            <img class="link-favicon" src="${escapeHtml(faviconUrl)}" alt="" loading="lazy" />
+            <img class="link-favicon" src="${escapeHtml(faviconUrl)}" alt="" loading="lazy" decoding="async" />
             <a class="link-anchor" href="${escapeHtml(link.url)}" target="_blank" rel="noopener noreferrer">
               ${escapeHtml(link.title || domain)}
             </a>
@@ -1175,8 +1275,9 @@
         renderLinksList(box);
         saveStateAndSync();
       });
-      list.appendChild(li);
+      frag.appendChild(li);
     });
+    list.replaceChildren(frag);
   }
 
   function renderParagraphsList(box) {
@@ -1185,10 +1286,11 @@
       list.innerHTML = '<div class="empty-placeholder">Henüz paragraf eklenmedi. Yukarıdaki "+ Paragraf Yaz" butonuna tıklayın.</div>';
       return;
     }
-    list.innerHTML = '';
+    const frag = document.createDocumentFragment();
     box.paragraphs.forEach((para) => {
       const card = document.createElement('div');
-      card.className = 'paragraph-card';
+      card.className = 'paragraph-card clickable-card';
+      card.setAttribute('tabindex', '0');
       card.innerHTML = `
         <div class="paragraph-card-head">
           <span class="paragraph-card-title">${escapeHtml(para.title || 'Başlıksız Paragraf')}</span>
@@ -1201,21 +1303,31 @@
         <p class="paragraph-card-text">${escapeHtml(para.content)}</p>
         <div class="item-meta">${formatDate(para.createdAt)}</div>
       `;
-      card.querySelector('.btn-open').addEventListener('click', () => {
+      card.addEventListener('click', (e) => {
+        if (e.target.closest('.btn-copy') || e.target.closest('.btn-del')) return;
         openParagraphModal(box.id, para.id);
       });
-      card.querySelector('.btn-copy').addEventListener('click', () => {
+      card.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          openParagraphModal(box.id, para.id);
+        }
+      });
+      card.querySelector('.btn-copy').addEventListener('click', (e) => {
+        e.stopPropagation();
         navigator.clipboard?.writeText(para.content);
         showToast('Paragraf kopyalandı.', 'success');
       });
-      card.querySelector('.btn-del').addEventListener('click', () => {
+      card.querySelector('.btn-del').addEventListener('click', (e) => {
+        e.stopPropagation();
         box.paragraphs = box.paragraphs.filter((p) => p.id !== para.id);
         box.updatedAt = Date.now();
         renderParagraphsList(box);
         saveStateAndSync();
       });
-      list.appendChild(card);
+      frag.appendChild(card);
     });
+    list.replaceChildren(frag);
   }
 
   function renderImagesList(box) {
@@ -1224,28 +1336,78 @@
       grid.innerHTML = '<div class="empty-placeholder" style="grid-column: 1 / -1;">Bu köşede henüz resim yok.</div>';
       return;
     }
-    grid.innerHTML = '';
+    const frag = document.createDocumentFragment();
     box.images.forEach((img) => {
       const tile = document.createElement('div');
       tile.className = 'image-tile';
+      const titleText = img.title || 'Resim';
       tile.innerHTML = `
-        <img src="${escapeHtml(img.dataUrl)}" alt="${escapeHtml(img.title || 'Depo Resmi')}" loading="lazy" />
-        <div class="image-tile-foot">
-          <span class="image-tile-title" title="${escapeHtml(img.title || 'Resim')}">${escapeHtml(img.title || 'Resim')}</span>
-          <button type="button" class="btn-mini-icon danger btn-del" title="Sil">${SVG_TRASH}</button>
+        <div class="image-tile-head">
+          <span class="image-tile-title" title="${escapeHtml(titleText)}">${escapeHtml(titleText)}</span>
+          <div class="image-tile-actions">
+            <button type="button" class="btn-mini-icon btn-rename-img" title="İsmi Düzenle">${SVG_EDIT}</button>
+            <button type="button" class="btn-mini-icon danger btn-del" title="Sil">${SVG_TRASH}</button>
+          </div>
         </div>
+        <img src="${escapeHtml(img.dataUrl)}" alt="${escapeHtml(titleText)}" loading="lazy" decoding="async" />
       `;
       tile.querySelector('img').addEventListener('click', () => {
         openLightbox(img.dataUrl, img.title || '');
       });
+
+      const startInlineRename = () => {
+        const head = tile.querySelector('.image-tile-head');
+        const spanEl = head.querySelector('.image-tile-title');
+        if (!spanEl) return;
+        const input = document.createElement('input');
+        input.type = 'text';
+        input.maxLength = 60;
+        input.className = 'inline-rename-input';
+        input.value = img.title || '';
+        input.placeholder = 'Resim ismi...';
+        spanEl.replaceWith(input);
+        input.focus();
+        input.select();
+
+        let done = false;
+        const commit = (save) => {
+          if (done) return;
+          done = true;
+          if (save) {
+            const nextTitle = input.value.trim() || 'Resim';
+            if (nextTitle !== (img.title || 'Resim')) {
+              img.title = nextTitle;
+              box.updatedAt = Date.now();
+              saveStateAndSync();
+              showToast('Resim ismi güncellendi.', 'success');
+            }
+          }
+          renderImagesList(box);
+        };
+
+        input.addEventListener('keydown', (ev) => {
+          if (ev.key === 'Enter') {
+            ev.preventDefault();
+            commit(true);
+          } else if (ev.key === 'Escape') {
+            ev.preventDefault();
+            commit(false);
+          }
+        });
+        input.addEventListener('blur', () => commit(true));
+      };
+
+      tile.querySelector('.image-tile-title').addEventListener('click', startInlineRename);
+      tile.querySelector('.btn-rename-img').addEventListener('click', startInlineRename);
       tile.querySelector('.btn-del').addEventListener('click', () => {
         box.images = box.images.filter((i) => i.id !== img.id);
         box.updatedAt = Date.now();
         renderImagesList(box);
         saveStateAndSync();
       });
-      grid.appendChild(tile);
+      frag.appendChild(tile);
     });
+    grid.replaceChildren(frag);
   }
 
   // ============================================================================
@@ -1333,6 +1495,36 @@
     });
   }
 
+  function clearPendingImages() {
+    pendingImages = [];
+    if ($('imagePendingForm')) $('imagePendingForm').hidden = true;
+    if ($('pendingImageNameInput')) $('pendingImageNameInput').value = '';
+    if ($('pendingImagePreview')) $('pendingImagePreview').removeAttribute('src');
+    if ($('pendingImageCountBadge')) $('pendingImageCountBadge').hidden = true;
+  }
+
+  function showNextPendingImage() {
+    const form = $('imagePendingForm');
+    if (!form) return;
+    if (!pendingImages.length) {
+      clearPendingImages();
+      return;
+    }
+    const current = pendingImages[0];
+    $('pendingImagePreview').src = current.dataUrl;
+    $('pendingImageNameInput').value = '';
+    $('pendingImageNameInput').placeholder = `İsim yaz (boşsa: ${current.defaultTitle})`;
+    const badge = $('pendingImageCountBadge');
+    if (pendingImages.length > 1) {
+      badge.textContent = `1 / ${pendingImages.length} bekliyor`;
+      badge.hidden = false;
+    } else {
+      badge.hidden = true;
+    }
+    form.hidden = false;
+    setTimeout(() => $('pendingImageNameInput').focus(), 40);
+  }
+
   async function handleImageFiles(files) {
     const box = getActiveBox();
     if (!box) return;
@@ -1345,21 +1537,16 @@
     for (const file of validFiles) {
       try {
         const dataUrl = await compressImageFile(file);
-        box.images.unshift({
-          id: uid('img'),
-          title: file.name.replace(/\.[^.]+$/, ''),
-          dataUrl,
-          createdAt: Date.now()
+        pendingImages.push({
+          defaultTitle: file.name.replace(/\.[^.]+$/, '') || 'Resim',
+          dataUrl
         });
       } catch (err) {
-        showToast(`Resim eklenemedi: ${err.message}`, 'error');
+        showToast(`Resim hazırlanamadı: ${err.message}`, 'error');
       }
     }
 
-    box.updatedAt = Date.now();
-    renderImagesList(box);
-    saveStateAndSync();
-    showToast(`${validFiles.length} resim eklendi.`, 'success');
+    showNextPendingImage();
   }
 
   // ============================================================================
@@ -1501,6 +1688,7 @@
   function setupFreeCanvasDragAndResize() {
     const container = $('depoCornersContainer');
     let interaction = null; // { type: 'drag'|'resize', cornerKey, startX, startY, origRect }
+    let dragRafId = 0;
 
     container.addEventListener('pointerdown', (e) => {
       if (appState.layoutMode !== 'free' || window.innerWidth < 900) return;
@@ -1531,28 +1719,39 @@
 
     window.addEventListener('pointermove', (e) => {
       if (!interaction) return;
-      const box = getActiveBox();
-      if (!box) return;
+      const clientX = e.clientX;
+      const clientY = e.clientY;
+      if (dragRafId) return;
+      dragRafId = requestAnimationFrame(() => {
+        dragRafId = 0;
+        if (!interaction) return;
+        const box = getActiveBox();
+        if (!box) return;
 
-      const dx = e.clientX - interaction.startX;
-      const dy = e.clientY - interaction.startY;
-      const bounds = getContainerBounds();
-      const target = box.cornerPositions[interaction.cornerKey];
+        const dx = clientX - interaction.startX;
+        const dy = clientY - interaction.startY;
+        const bounds = getContainerBounds();
+        const target = box.cornerPositions[interaction.cornerKey];
 
-      if (interaction.type === 'drag') {
-        target.x = interaction.origRect.x + dx;
-        target.y = interaction.origRect.y + dy;
-      } else {
-        target.w = Math.max(280, interaction.origRect.w + dx);
-        target.h = Math.max(240, interaction.origRect.h + dy);
-      }
+        if (interaction.type === 'drag') {
+          target.x = interaction.origRect.x + dx;
+          target.y = interaction.origRect.y + dy;
+        } else {
+          target.w = Math.max(280, interaction.origRect.w + dx);
+          target.h = Math.max(240, interaction.origRect.h + dy);
+        }
 
-      resolveCollisions(interaction.cornerKey, box.cornerPositions, bounds);
-      applyFreePositionsToDom(box);
+        resolveCollisions(interaction.cornerKey, box.cornerPositions, bounds);
+        applyFreePositionsToDom(box);
+      });
     });
 
     window.addEventListener('pointerup', () => {
       if (!interaction) return;
+      if (dragRafId) {
+        cancelAnimationFrame(dragRafId);
+        dragRafId = 0;
+      }
       document.querySelectorAll('.corner-panel.dragging').forEach((p) => p.classList.remove('dragging'));
       interaction = null;
       const box = getActiveBox();
@@ -1592,6 +1791,26 @@
     editingParaContext = null;
   }
 
+  function openNoteModal(boxId, noteId) {
+    const box = appState.boxes.find((b) => b.id === boxId);
+    if (!box) return;
+    const note = box.notes.find((n) => n.id === noteId);
+    if (!note) return;
+    editingNoteContext = { boxId, noteId };
+    const title = note.title || note.text || 'Not';
+    $('noteModalHeading').textContent = title;
+    $('noteModalTitleInput').value = title;
+    $('noteModalContentInput').value = note.content || '';
+    $('noteModalSavedTag').textContent = 'Otomatik kayıt';
+    $('noteEditModal').hidden = false;
+    setTimeout(() => $('noteModalContentInput').focus(), 40);
+  }
+
+  function closeNoteModal() {
+    if ($('noteEditModal')) $('noteEditModal').hidden = true;
+    editingNoteContext = null;
+  }
+
   function openLightbox(src, caption) {
     $('lightboxImg').src = src;
     $('lightboxCaption').textContent = caption;
@@ -1600,7 +1819,43 @@
 
   function closeLightbox() {
     $('lightboxModal').hidden = true;
-    $('lightboxImg').src = '';
+    $('lightboxImg').removeAttribute('src');
+  }
+
+  function closeTopOverlayOrExpandedCorner() {
+    if ($('lightboxModal') && !$('lightboxModal').hidden) {
+      closeLightbox();
+      return true;
+    }
+    if ($('noteEditModal') && !$('noteEditModal').hidden) {
+      if ($('btnCloseNoteModal')) $('btnCloseNoteModal').click();
+      return true;
+    }
+    if ($('paragraphReadModal') && !$('paragraphReadModal').hidden) {
+      closeParagraphModal();
+      return true;
+    }
+    if ($('boxEditModal') && !$('boxEditModal').hidden) {
+      closeBoxEditModal();
+      return true;
+    }
+    if ($('syncModal') && !$('syncModal').hidden) {
+      $('syncModal').hidden = true;
+      return true;
+    }
+    if ($('securityModal') && !$('securityModal').hidden) {
+      $('securityModal').hidden = true;
+      return true;
+    }
+    if ($('iosInstallModal') && !$('iosInstallModal').hidden) {
+      $('iosInstallModal').hidden = true;
+      return true;
+    }
+    if (document.querySelector('.corner-panel.expanded')) {
+      collapseAllCorners();
+      return true;
+    }
+    return false;
   }
 
   function switchSyncTab(tabName) {
@@ -1745,10 +2000,14 @@
     });
 
     // Üst bar navigasyon
-    $('btnLogoHome').addEventListener('click', closeDepoView);
-    $('btnBackHome').addEventListener('click', closeDepoView);
+    $('btnLogoHome').addEventListener('click', () => closeDepoView());
+    $('btnBackHome').addEventListener('click', () => closeDepoView());
 
-    $('boxSearchInput').addEventListener('input', renderHomeGrid);
+    let searchDebounceTimer = null;
+    $('boxSearchInput').addEventListener('input', () => {
+      clearTimeout(searchDebounceTimer);
+      searchDebounceTimer = setTimeout(renderHomeGrid, 120);
+    });
     $('btnAddBox').addEventListener('click', () => openBoxEditModal(null));
     $('btnRenameActiveBox').addEventListener('click', () => {
       if (activeBoxId) openBoxEditModal(activeBoxId);
@@ -1860,13 +2119,95 @@
     $('noteForm').addEventListener('submit', (e) => {
       e.preventDefault();
       const box = getActiveBox();
-      const text = $('noteInput').value.trim();
-      if (!box || !text) return;
-      box.notes.unshift({ id: uid('note'), text, createdAt: Date.now() });
-      box.updatedAt = Date.now();
+      if (!box) return;
+      const rawTitle = $('noteInput').value.trim();
+      const scratchContent = $('quickScratchpad').value;
+      if (!rawTitle && !scratchContent.trim()) {
+        showToast('Lütfen not içeriği veya not adı yazın.', 'warn');
+        $('noteInput').focus();
+        return;
+      }
+      const fallbackTitle = scratchContent
+        .split(/\r?\n/)
+        .map((line) => line.trim())
+        .find(Boolean)
+        ?.slice(0, 40) || 'Adsız Not';
+      const title = rawTitle || fallbackTitle;
+      const now = Date.now();
+      box.notes.unshift({
+        id: uid('note'),
+        title,
+        text: title,
+        content: scratchContent,
+        createdAt: now,
+        updatedAt: now
+      });
+      clearTimeout(scratchpadTimer);
+      box.scratchpad = '';
+      box.updatedAt = now;
+      $('quickScratchpad').value = '';
       $('noteInput').value = '';
+      $('scratchpadSavedIndicator').textContent = 'Not eklendi ✓';
       renderNotesList(box);
       saveStateAndSync();
+      showToast(`"${title}" notu eklendi.`, 'success');
+    });
+
+    // Not İçeriği / Düzenleme Modalı (Otomatik Kayıt + Kaydet)
+    let noteModalSaveTimer = null;
+    function syncActiveNoteEdits() {
+      if (!editingNoteContext) return false;
+      const box = appState.boxes.find((b) => b.id === editingNoteContext.boxId);
+      const note = box?.notes.find((n) => n.id === editingNoteContext.noteId);
+      if (!note) return false;
+      const newTitle = $('noteModalTitleInput').value.trim() || 'Adsız Not';
+      const newContent = $('noteModalContentInput').value;
+      const oldTitle = note.title || note.text || 'Adsız Not';
+      const oldContent = note.content || '';
+      if (newTitle === oldTitle && newContent === oldContent) return false;
+      note.title = newTitle;
+      note.text = newTitle;
+      note.content = newContent;
+      note.updatedAt = Date.now();
+      box.updatedAt = Date.now();
+      $('noteModalHeading').textContent = newTitle;
+      if (activeBoxId === box.id) renderNotesList(box);
+      return true;
+    }
+
+    [$('noteModalTitleInput'), $('noteModalContentInput')].forEach((inputEl) => {
+      inputEl.addEventListener('input', () => {
+        $('noteModalSavedTag').textContent = 'Yazılıyor...';
+        clearTimeout(noteModalSaveTimer);
+        noteModalSaveTimer = setTimeout(() => {
+          const changed = syncActiveNoteEdits();
+          $('noteModalSavedTag').textContent = 'Kaydedildi ✓';
+          if (changed) saveStateAndSync();
+        }, 350);
+      });
+    });
+
+    $('btnCloseNoteModal').addEventListener('click', () => {
+      clearTimeout(noteModalSaveTimer);
+      if (syncActiveNoteEdits()) saveStateAndSync();
+      closeNoteModal();
+    });
+    $('noteEditModal').addEventListener('click', (e) => {
+      if (e.target === $('noteEditModal')) {
+        clearTimeout(noteModalSaveTimer);
+        if (syncActiveNoteEdits()) saveStateAndSync();
+        closeNoteModal();
+      }
+    });
+    $('btnCopyNoteModal').addEventListener('click', () => {
+      navigator.clipboard?.writeText($('noteModalContentInput').value);
+      showToast('Not içeriği kopyalandı.', 'success');
+    });
+    $('btnSaveNoteModal').addEventListener('click', () => {
+      clearTimeout(noteModalSaveTimer);
+      if (syncActiveNoteEdits()) saveStateAndSync();
+      closeNoteModal();
+      showToast('Not kaydedildi.', 'success');
     });
 
     // SAĞ ÜST KÖŞE: Link Ekleme
@@ -1999,6 +2340,31 @@
       saveStateAndSync();
     });
 
+    $('imagePendingForm').addEventListener('submit', (e) => {
+      e.preventDefault();
+      const box = getActiveBox();
+      if (!box || !pendingImages.length) return;
+      const current = pendingImages.shift();
+      const chosenTitle = $('pendingImageNameInput').value.trim() || current.defaultTitle || 'Resim';
+      box.images.unshift({
+        id: uid('img'),
+        title: chosenTitle,
+        dataUrl: current.dataUrl,
+        createdAt: Date.now()
+      });
+      box.updatedAt = Date.now();
+      renderImagesList(box);
+      saveStateAndSync();
+      showToast(`"${chosenTitle}" resmi kaydedildi.`, 'success');
+      showNextPendingImage();
+    });
+
+    $('btnCancelPendingImage').addEventListener('click', () => {
+      if (!pendingImages.length) return;
+      pendingImages.shift();
+      showNextPendingImage();
+    });
+
     // Lightbox
     $('btnCloseLightbox').addEventListener('click', closeLightbox);
     $('lightboxModal').addEventListener('click', (e) => {
@@ -2061,6 +2427,7 @@
         return;
       }
 
+      clearSessionCryptoCache();
       sessionMasterPassword = newPass;
       saveSecurityMeta({ enabled: true, autoLockMinutes });
       await persistLocalState(false);
@@ -2084,6 +2451,7 @@
         return;
       }
       sessionMasterPassword = null;
+      clearSessionCryptoCache();
       clearTimeout(autoLockTimer);
       saveSecurityMeta({ enabled: false, autoLockMinutes: 5 });
       await persistLocalState(false);
@@ -2251,17 +2619,28 @@
     $('btnCloseIosModal').addEventListener('click', () => ($('iosInstallModal').hidden = true));
     $('btnOkIosModal').addEventListener('click', () => ($('iosInstallModal').hidden = true));
 
+    // Tarayıcı / Telefon Geri Tuşu Desteği (Depodan veya siteden atmadan ana sayfaya döner)
+    window.addEventListener('popstate', () => {
+      if (isVaultLocked) return;
+      if (closeTopOverlayOrExpandedCorner()) {
+        if (activeBoxId && !$('depoView').hidden) {
+          history.pushState({ view: 'depo', boxId: activeBoxId }, '', `#depo-${encodeURIComponent(activeBoxId)}`);
+        }
+        return;
+      }
+      const st = history.state;
+      if (st && st.view === 'depo' && st.boxId) {
+        openDepoView(st.boxId, { pushHistory: false });
+      } else if (activeBoxId || !$('depoView').hidden) {
+        closeDepoView({ fromPopState: true });
+      }
+    });
+
     // ESC ile açık modalları kapat
     window.addEventListener('keydown', (e) => {
       if (e.key === 'Escape') {
-        closeLightbox();
-        closeBoxEditModal();
-        closeParagraphModal();
-        $('syncModal').hidden = true;
-        $('securityModal').hidden = true;
-        $('iosInstallModal').hidden = true;
+        closeTopOverlayOrExpandedCorner();
         closeMegaMenus();
-        collapseAllCorners();
       }
     });
 
@@ -2278,15 +2657,20 @@
       }
     });
 
-    // Ekran yeniden boyutlandırmada serbest köşe masası sınırlarını koru
+    // Ekran yeniden boyutlandırmada serbest köşe masası sınırlarını rAF ile koru
+    let resizeRafId = 0;
     window.addEventListener('resize', () => {
-      const box = getActiveBox();
-      if (box && appState.layoutMode === 'free' && window.innerWidth >= 900) {
-        resolveCollisions('notes', box.cornerPositions, getContainerBounds());
-        applyFreePositionsToDom(box);
-      } else if (box) {
-        applyFreePositionsToDom(box);
-      }
+      if (resizeRafId) return;
+      resizeRafId = requestAnimationFrame(() => {
+        resizeRafId = 0;
+        const box = getActiveBox();
+        if (box && appState.layoutMode === 'free' && window.innerWidth >= 900) {
+          resolveCollisions('notes', box.cornerPositions, getContainerBounds());
+          applyFreePositionsToDom(box);
+        } else if (box) {
+          applyFreePositionsToDom(box);
+        }
+      });
     });
   }
 
@@ -2294,6 +2678,9 @@
   // BAŞLATMA (BOOT)
   // ============================================================================
   async function init() {
+    securityMeta = loadSecurityMeta();
+    syncConfig = loadSyncConfigRaw();
+
     const rawLocal = await loadLocalStateRaw();
     const needsUnlock =
       VaultCrypto.isEncryptedEnvelope(rawLocal) ||
@@ -2305,6 +2692,12 @@
       appState = createInitialState();
     } else {
       appState = rawLocal ? sanitizeState(rawLocal) : createInitialState();
+    }
+
+    const initialHash = window.location.hash;
+    const baseCleanUrl = `${window.location.pathname}${window.location.search}`;
+    if (!history.state) {
+      history.replaceState({ view: 'home' }, '', baseCleanUrl);
     }
 
     bindEvents();
@@ -2325,6 +2718,12 @@
       showVaultLockOverlay();
     } else {
       renderAll();
+      if (initialHash.startsWith('#depo-')) {
+        const hashBoxId = decodeURIComponent(initialHash.slice(6));
+        if (appState.boxes.some((b) => b.id === hashBoxId)) {
+          openDepoView(hashBoxId, { pushHistory: true });
+        }
+      }
       await checkUrlPairingParam();
       if (!isVaultLocked && isCloudConfigured()) {
         pullFromCloud(false, false);
