@@ -1686,9 +1686,12 @@ kbd {
 
 @media (max-width: 899px) {
   .navbar-shell { top: 8px; margin-top: 8px; padding: 0 12px; }
+  .floating-navbar { padding: 0 10px; gap: 6px; }
   .app-main { padding: 24px 14px 48px; }
   .btn-icon-label .btn-label { display: none; }
-  .btn-icon-label { padding: 8px 10px; }
+  .btn-icon-label { padding: 8px 9px; }
+  #btnInstallPwa .btn-label { display: inline !important; font-size: 0.76rem; }
+  #btnInstallPwa { padding: 7px 11px; }
   .box-card-actions { opacity: 1; }
   .depo-topbar-right { display: none; }
   .mobile-corner-tabs { display: flex; }
@@ -1719,4 +1722,11 @@ kbd {
   .footer-columns { grid-template-columns: 1fr; }
   .cta-gallery-card { padding: 32px 22px; }
   .cta-buttons { width: 100%; }
+}
+
+@media (max-width: 540px) {
+  .brand-title { font-size: 0.9rem; }
+  .sync-badge { padding: 6px 8px; }
+  #syncStatusText { display: none; }
+  .nav-right { gap: 5px; }
 }

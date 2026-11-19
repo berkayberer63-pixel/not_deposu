@@ -2313,9 +2313,12 @@
 
     // Service Worker kaydı (GitHub Pages + PWA desteği)
     if ('serviceWorker' in navigator) {
-      navigator.serviceWorker.register('./sw.js').catch((err) => {
-        console.warn('Service Worker kaydı atlandı:', err);
-      });
+      navigator.serviceWorker
+        .register('./sw.js', { updateViaCache: 'none' })
+        .then((reg) => reg.update().catch(() => {}))
+        .catch((err) => {
+          console.warn('Service Worker kaydı atlandı:', err);
+        });
     }
 
     if (needsUnlock) {
